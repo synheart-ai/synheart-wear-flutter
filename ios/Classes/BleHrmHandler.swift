@@ -16,6 +16,7 @@ public class BleHrmHandler: NSObject {
 
     private var scanResult: FlutterResult?
     private var connectResult: FlutterResult?
+    private var permissionResult: FlutterResult?
     private var scanTimer: Timer?
     private var sessionId: String?
 
@@ -59,8 +60,28 @@ public class BleHrmHandler: NSObject {
             disconnect(result: result)
         case "isConnected":
             result(connectedPeripheral?.state == .connected)
+        case "requestPermission":
+            requestPermission(result: result)
         default:
             result(FlutterMethodNotImplemented)
+        }
+    }
+
+    // MARK: - Permission
+
+    private func requestPermission(result: @escaping FlutterResult) {
+        if centralManager == nil {
+            centralManager = CBCentralManager(delegate: self, queue: nil)
+        }
+
+        switch centralManager?.state {
+        case .poweredOn:
+            result("granted")
+        case .unauthorized:
+            result("denied")
+        default:
+            // Still initializing — store callback, resolved in centralManagerDidUpdateState
+            permissionResult = result
         }
     }
 
@@ -178,6 +199,11 @@ extension BleHrmHandler: CBCentralManagerDelegate {
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
+            // Resolve pending permission request
+            if let permResult = permissionResult {
+                permResult("granted")
+                permissionResult = nil
+            }
             // If we have a pending scan, start it now
             if scanResult != nil {
                 discoveredPeripherals.removeAll()
@@ -190,9 +216,13 @@ extension BleHrmHandler: CBCentralManagerDelegate {
                 }
             }
         case .poweredOff:
+            permissionResult?("denied")
+            permissionResult = nil
             scanResult?(FlutterError(code: "BLUETOOTH_OFF", message: "Bluetooth is turned off", details: nil))
             scanResult = nil
         case .unauthorized:
+            permissionResult?("denied")
+            permissionResult = nil
             scanResult?(FlutterError(code: "PERMISSION_DENIED", message: "Bluetooth permission denied", details: nil))
             scanResult = nil
         default:
