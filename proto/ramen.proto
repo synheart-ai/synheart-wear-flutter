@@ -15,8 +15,22 @@ message SubscribeRequest {
   string app_id = 4;    // required; server validates; also sent as x-app-id header
 }
 
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  ACK_STATUS_SUCCESS = 1;
+}
+
 message Ack {
   int64 seq = 1;        // event.seq from EventEnvelope
+  AckStatus status = 2;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_AUTH_FAILED = 1;
+  ERROR_CODE_INVALID_APP = 2;
+  ERROR_CODE_RATE_LIMITED = 3;
+  ERROR_CODE_INTERNAL = 4;
 }
 
 message Heartbeat {
@@ -32,6 +46,12 @@ message ClientMessage {
 }
 
 // Server -> Client messages
+message SubscribeResponse {
+  string connection_id = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  int32 heartbeat_interval_seconds = 3;
+}
+
 message EventEnvelope {
   string event_id = 1;
   int64 seq = 2;
@@ -42,10 +62,18 @@ message HeartbeatAck {
   int64 rtt_ms = 1;
 }
 
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  bool fatal = 3;
+}
+
 message ServerMessage {
   oneof message {
     EventEnvelope event = 1;
     HeartbeatAck heartbeat_ack = 2;
+    SubscribeResponse subscribe_response = 3;
+    Error error = 4;
   }
 }
 

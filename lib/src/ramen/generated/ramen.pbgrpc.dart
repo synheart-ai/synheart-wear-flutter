@@ -21,7 +21,7 @@ export 'ramen.pb.dart';
 // GrpcServiceName omitted for protobuf 2.x compatibility (exists in protobuf 6.x only)
 class RamenServiceClient extends $grpc.Client {
   static final _$subscribe = $grpc.ClientMethod<$0.ClientMessage, $0.ServerMessage>(
-      '/ramen.RamenService/subscribe',
+      '/ramen.v1.RAMENService/Subscribe',
       ($0.ClientMessage value) => value.writeToBuffer(),
       ($core.List<$core.int> value) => $0.ServerMessage.fromBuffer(value));
 
@@ -37,7 +37,7 @@ class RamenServiceClient extends $grpc.Client {
 }
 
 abstract class RamenServiceBase extends $grpc.Service {
-  $core.String get $name => 'ramen.RamenService';
+  $core.String get $name => 'ramen.v1.RAMENService';
 
   RamenServiceBase() {
     $addMethod($grpc.ServiceMethod<$0.ClientMessage, $0.ServerMessage>(

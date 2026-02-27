@@ -98,7 +98,7 @@ class _RamenPageState extends State<RamenPage> {
       'host': host,
       'port': port,
       'appId': appId,
-      'apiKey': apiKey.isNotEmpty ? '***' : '',
+      'apiKey': apiKey,
       'deviceId': deviceId,
       'userId': userId,
       'useTls': port == 443,
@@ -113,6 +113,7 @@ class _RamenPageState extends State<RamenPage> {
       deviceId: deviceId,
       userId: userId,
       useTls: port == 443,
+      logResponses: true,
     );
     _client = client;
 

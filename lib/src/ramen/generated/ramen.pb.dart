@@ -14,6 +14,9 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'google_protobuf_timestamp.pb.dart' as $wk;
+import 'ramen.pbenum.dart';
+
+export 'ramen.pbenum.dart';
 
 class SubscribeRequest extends $pb.GeneratedMessage {
   factory SubscribeRequest() => create();
@@ -95,6 +98,7 @@ class Ack extends $pb.GeneratedMessage {
 
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(_omitMessageNames ? '' : 'Ack', package: const $pb.PackageName(_omitMessageNames ? '' : 'ramen'), createEmptyInstance: create)
     ..aInt64(1, _omitFieldNames ? '' : 'seq')
+    ..e<AckStatus>(2, _omitFieldNames ? '' : 'status', $pb.PbFieldType.OE, defaultOrMaker: AckStatus.ACK_STATUS_UNSPECIFIED, valueOf: AckStatus.valueOf, enumValues: AckStatus.values)
     ..hasRequiredFields = false
   ;
 
@@ -127,6 +131,15 @@ class Ack extends $pb.GeneratedMessage {
   $core.bool hasSeq() => $_has(0);
   @$pb.TagNumber(1)
   void clearSeq() => clearField(1);
+
+  @$pb.TagNumber(2)
+  AckStatus get status => $_getN(1);
+  @$pb.TagNumber(2)
+  set status(AckStatus v) { setField(2, v); }
+  @$pb.TagNumber(2)
+  $core.bool hasStatus() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearStatus() => clearField(2);
 }
 
 class Heartbeat extends $pb.GeneratedMessage {
@@ -256,6 +269,70 @@ class ClientMessage extends $pb.GeneratedMessage {
   Heartbeat ensureHeartbeat() => $_ensure(2);
 }
 
+class SubscribeResponse extends $pb.GeneratedMessage {
+  factory SubscribeResponse() => create();
+  SubscribeResponse._() : super();
+  factory SubscribeResponse.fromBuffer($core.List<$core.int> i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromBuffer(i, r);
+  factory SubscribeResponse.fromJson($core.String i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromJson(i, r);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(_omitMessageNames ? '' : 'SubscribeResponse', package: const $pb.PackageName(_omitMessageNames ? '' : 'ramen'), createEmptyInstance: create)
+    ..aOS(1, _omitFieldNames ? '' : 'connectionId')
+    ..aOM<$wk.Timestamp>(2, _omitFieldNames ? '' : 'expiresAt', subBuilder: $wk.Timestamp.create)
+    ..a<$core.int>(3, _omitFieldNames ? '' : 'heartbeatIntervalSeconds', $pb.PbFieldType.O3)
+    ..hasRequiredFields = false
+  ;
+
+  @$core.Deprecated(
+  'Using this can add significant overhead to your binary. '
+  'Use [GeneratedMessageGenericExtensions.deepCopy] instead. '
+  'Will be removed in next major version')
+  SubscribeResponse clone() => SubscribeResponse()..mergeFromMessage(this);
+  @$core.Deprecated(
+  'Using this can add significant overhead to your binary. '
+  'Use [GeneratedMessageGenericExtensions.rebuild] instead. '
+  'Will be removed in next major version')
+  SubscribeResponse copyWith(void Function(SubscribeResponse) updates) => super.copyWith((message) => updates(message as SubscribeResponse)) as SubscribeResponse;
+
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static SubscribeResponse create() => SubscribeResponse._();
+  SubscribeResponse createEmptyInstance() => create();
+  static $pb.PbList<SubscribeResponse> createRepeated() => $pb.PbList<SubscribeResponse>();
+  @$core.pragma('dart2js:noInline')
+  static SubscribeResponse getDefault() => _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<SubscribeResponse>(create);
+  static SubscribeResponse? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  $core.String get connectionId => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set connectionId($core.String v) { $_setString(0, v); }
+  @$pb.TagNumber(1)
+  $core.bool hasConnectionId() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearConnectionId() => clearField(1);
+
+  @$pb.TagNumber(2)
+  $wk.Timestamp get expiresAt => $_getN(1);
+  @$pb.TagNumber(2)
+  set expiresAt($wk.Timestamp v) { setField(2, v); }
+  @$pb.TagNumber(2)
+  $core.bool hasExpiresAt() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearExpiresAt() => clearField(2);
+  @$pb.TagNumber(2)
+  $wk.Timestamp ensureExpiresAt() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  $core.int get heartbeatIntervalSeconds => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set heartbeatIntervalSeconds($core.int v) { $_setSignedInt32(2, v); }
+  @$pb.TagNumber(3)
+  $core.bool hasHeartbeatIntervalSeconds() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearHeartbeatIntervalSeconds() => clearField(3);
+}
+
 class EventEnvelope extends $pb.GeneratedMessage {
   factory EventEnvelope() => create();
   EventEnvelope._() : super();
@@ -360,9 +437,73 @@ class HeartbeatAck extends $pb.GeneratedMessage {
   void clearRttMs() => clearField(1);
 }
 
+class Error extends $pb.GeneratedMessage {
+  factory Error() => create();
+  Error._() : super();
+  factory Error.fromBuffer($core.List<$core.int> i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromBuffer(i, r);
+  factory Error.fromJson($core.String i, [$pb.ExtensionRegistry r = $pb.ExtensionRegistry.EMPTY]) => create()..mergeFromJson(i, r);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(_omitMessageNames ? '' : 'Error', package: const $pb.PackageName(_omitMessageNames ? '' : 'ramen'), createEmptyInstance: create)
+    ..e<ErrorCode>(1, _omitFieldNames ? '' : 'code', $pb.PbFieldType.OE, defaultOrMaker: ErrorCode.ERROR_CODE_UNSPECIFIED, valueOf: ErrorCode.valueOf, enumValues: ErrorCode.values)
+    ..aOS(2, _omitFieldNames ? '' : 'message')
+    ..aOB(3, _omitFieldNames ? '' : 'fatal')
+    ..hasRequiredFields = false
+  ;
+
+  @$core.Deprecated(
+  'Using this can add significant overhead to your binary. '
+  'Use [GeneratedMessageGenericExtensions.deepCopy] instead. '
+  'Will be removed in next major version')
+  Error clone() => Error()..mergeFromMessage(this);
+  @$core.Deprecated(
+  'Using this can add significant overhead to your binary. '
+  'Use [GeneratedMessageGenericExtensions.rebuild] instead. '
+  'Will be removed in next major version')
+  Error copyWith(void Function(Error) updates) => super.copyWith((message) => updates(message as Error)) as Error;
+
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  static Error create() => Error._();
+  Error createEmptyInstance() => create();
+  static $pb.PbList<Error> createRepeated() => $pb.PbList<Error>();
+  @$core.pragma('dart2js:noInline')
+  static Error getDefault() => _defaultInstance ??= $pb.GeneratedMessage.$_defaultFor<Error>(create);
+  static Error? _defaultInstance;
+
+  @$pb.TagNumber(1)
+  ErrorCode get code => $_getN(0);
+  @$pb.TagNumber(1)
+  set code(ErrorCode v) { setField(1, v); }
+  @$pb.TagNumber(1)
+  $core.bool hasCode() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearCode() => clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.String get message => $_getSZ(1);
+  @$pb.TagNumber(2)
+  set message($core.String v) { $_setString(1, v); }
+  @$pb.TagNumber(2)
+  $core.bool hasMessage() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearMessage() => clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.bool get fatal => $_getBF(2);
+  @$pb.TagNumber(3)
+  set fatal($core.bool v) { $_setBool(2, v); }
+  @$pb.TagNumber(3)
+  $core.bool hasFatal() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearFatal() => clearField(3);
+}
+
 enum ServerMessage_Message {
   event, 
   heartbeatAck, 
+  subscribeResponse,
+  error,
   notSet
 }
 
@@ -375,12 +516,16 @@ class ServerMessage extends $pb.GeneratedMessage {
   static const $core.Map<$core.int, ServerMessage_Message> _ServerMessage_MessageByTag = {
     1 : ServerMessage_Message.event,
     2 : ServerMessage_Message.heartbeatAck,
+    3 : ServerMessage_Message.subscribeResponse,
+    4 : ServerMessage_Message.error,
     0 : ServerMessage_Message.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(_omitMessageNames ? '' : 'ServerMessage', package: const $pb.PackageName(_omitMessageNames ? '' : 'ramen'), createEmptyInstance: create)
-    ..oo(0, [1, 2])
+    ..oo(0, [1, 2, 3, 4])
     ..aOM<EventEnvelope>(1, _omitFieldNames ? '' : 'event', subBuilder: EventEnvelope.create)
     ..aOM<HeartbeatAck>(2, _omitFieldNames ? '' : 'heartbeatAck', subBuilder: HeartbeatAck.create)
+    ..aOM<SubscribeResponse>(3, _omitFieldNames ? '' : 'subscribeResponse', subBuilder: SubscribeResponse.create)
+    ..aOM<Error>(4, _omitFieldNames ? '' : 'error', subBuilder: Error.create)
     ..hasRequiredFields = false
   ;
 
@@ -429,6 +574,28 @@ class ServerMessage extends $pb.GeneratedMessage {
   void clearHeartbeatAck() => clearField(2);
   @$pb.TagNumber(2)
   HeartbeatAck ensureHeartbeatAck() => $_ensure(1);
+
+  @$pb.TagNumber(3)
+  SubscribeResponse get subscribeResponse => $_getN(2);
+  @$pb.TagNumber(3)
+  set subscribeResponse(SubscribeResponse v) { setField(3, v); }
+  @$pb.TagNumber(3)
+  $core.bool hasSubscribeResponse() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSubscribeResponse() => clearField(3);
+  @$pb.TagNumber(3)
+  SubscribeResponse ensureSubscribeResponse() => $_ensure(2);
+
+  @$pb.TagNumber(4)
+  Error get error => $_getN(3);
+  @$pb.TagNumber(4)
+  set error(Error v) { setField(4, v); }
+  @$pb.TagNumber(4)
+  $core.bool hasError() => $_has(3);
+  @$pb.TagNumber(4)
+  void clearError() => clearField(4);
+  @$pb.TagNumber(4)
+  Error ensureError() => $_ensure(3);
 }
 
 

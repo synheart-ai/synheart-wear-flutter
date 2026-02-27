@@ -13,6 +13,27 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+@$core.Deprecated('Use ackStatusDescriptor instead')
+const AckStatus$json = {
+  '1': 'AckStatus',
+  '2': [
+    {'1': 'ACK_STATUS_UNSPECIFIED', '2': 0},
+    {'1': 'ACK_STATUS_SUCCESS', '2': 1},
+  ],
+};
+
+@$core.Deprecated('Use errorCodeDescriptor instead')
+const ErrorCode$json = {
+  '1': 'ErrorCode',
+  '2': [
+    {'1': 'ERROR_CODE_UNSPECIFIED', '2': 0},
+    {'1': 'ERROR_CODE_AUTH_FAILED', '2': 1},
+    {'1': 'ERROR_CODE_INVALID_APP', '2': 2},
+    {'1': 'ERROR_CODE_RATE_LIMITED', '2': 3},
+    {'1': 'ERROR_CODE_INTERNAL', '2': 4},
+  ],
+};
+
 @$core.Deprecated('Use subscribeRequestDescriptor instead')
 const SubscribeRequest$json = {
   '1': 'SubscribeRequest',
@@ -20,37 +41,26 @@ const SubscribeRequest$json = {
     {'1': 'last_seq', '3': 1, '4': 1, '5': 3, '10': 'lastSeq'},
     {'1': 'device_id', '3': 2, '4': 1, '5': 9, '10': 'deviceId'},
     {'1': 'user_id', '3': 3, '4': 1, '5': 9, '10': 'userId'},
+    {'1': 'app_id', '3': 4, '4': 1, '5': 9, '10': 'appId'},
   ],
 };
-
-/// Descriptor for `SubscribeRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List subscribeRequestDescriptor = $convert.base64Decode(
-    'ChBTdWJzY3JpYmVSZXF1ZXN0EhkKCGxhc3Rfc2VxGAEgASgDUgdsYXN0U2VxEhsKCWRldmljZV'
-    '9pZBgCIAEoCVIIZGV2aWNlSWQ=');
 
 @$core.Deprecated('Use ackDescriptor instead')
 const Ack$json = {
   '1': 'Ack',
   '2': [
     {'1': 'seq', '3': 1, '4': 1, '5': 3, '10': 'seq'},
+    {'1': 'status', '3': 2, '4': 1, '5': 14, '6': '.ramen.AckStatus', '10': 'status'},
   ],
 };
-
-/// Descriptor for `Ack`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List ackDescriptor = $convert.base64Decode(
-    'CgNBY2sSEAoDc2VxGAEgASgDUgNzZXE=');
 
 @$core.Deprecated('Use heartbeatDescriptor instead')
 const Heartbeat$json = {
   '1': 'Heartbeat',
   '2': [
-    {'1': 'timestamp', '3': 1, '4': 1, '5': 3, '10': 'timestamp'},
+    {'1': 'timestamp', '3': 1, '4': 1, '5': 11, '6': '.google.protobuf.Timestamp', '10': 'timestamp'},
   ],
 };
-
-/// Descriptor for `Heartbeat`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List heartbeatDescriptor = $convert.base64Decode(
-    'CglIZWFydGJlYXQSHAoJdGltZXN0YW1wGAEgASgDUgl0aW1lc3RhbXA=');
 
 @$core.Deprecated('Use clientMessageDescriptor instead')
 const ClientMessage$json = {
@@ -65,11 +75,15 @@ const ClientMessage$json = {
   ],
 };
 
-/// Descriptor for `ClientMessage`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
-    'Cg1DbGllbnRNZXNzYWdlEjcKCXN1YnNjcmliZRgBIAEoCzIXLnJhbWVuLlN1YnNjcmliZVJlcX'
-    'Vlc3RIAFIJc3Vic2NyaWJlEh4KA2FjaxgCIAEoCzIKLnJhbWVuLkFja0gAUgNhY2sSMAoJaGVh'
-    'cnRiZWF0GAMgASgLMhAucmFtZW4uSGVhcnRiZWF0SABSCWhlYXJ0YmVhdEIJCgdtZXNzYWdl');
+@$core.Deprecated('Use subscribeResponseDescriptor instead')
+const SubscribeResponse$json = {
+  '1': 'SubscribeResponse',
+  '2': [
+    {'1': 'connection_id', '3': 1, '4': 1, '5': 9, '10': 'connectionId'},
+    {'1': 'expires_at', '3': 2, '4': 1, '5': 11, '6': '.google.protobuf.Timestamp', '10': 'expiresAt'},
+    {'1': 'heartbeat_interval_seconds', '3': 3, '4': 1, '5': 5, '10': 'heartbeatIntervalSeconds'},
+  ],
+};
 
 @$core.Deprecated('Use eventEnvelopeDescriptor instead')
 const EventEnvelope$json = {
@@ -81,11 +95,6 @@ const EventEnvelope$json = {
   ],
 };
 
-/// Descriptor for `EventEnvelope`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List eventEnvelopeDescriptor = $convert.base64Decode(
-    'Cg1FdmVudEVudmVsb3BlEhkKCGV2ZW50X2lkGAEgASgJUgdldmVudElkEhAKA3NlcRgCIAEoA1'
-    'IDc2VxEhgKB3BheWxvYWQYAyABKAlSB3BheWxvYWQ=');
-
 @$core.Deprecated('Use heartbeatAckDescriptor instead')
 const HeartbeatAck$json = {
   '1': 'HeartbeatAck',
@@ -94,9 +103,15 @@ const HeartbeatAck$json = {
   ],
 };
 
-/// Descriptor for `HeartbeatAck`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List heartbeatAckDescriptor = $convert.base64Decode(
-    'CgxIZWFydGJlYXRBY2sSFQoGcnR0X21zGAEgASgDUgVydHRNcw==');
+@$core.Deprecated('Use errorDescriptor instead')
+const Error$json = {
+  '1': 'Error',
+  '2': [
+    {'1': 'code', '3': 1, '4': 1, '5': 14, '6': '.ramen.ErrorCode', '10': 'code'},
+    {'1': 'message', '3': 2, '4': 1, '5': 9, '10': 'message'},
+    {'1': 'fatal', '3': 3, '4': 1, '5': 8, '10': 'fatal'},
+  ],
+};
 
 @$core.Deprecated('Use serverMessageDescriptor instead')
 const ServerMessage$json = {
@@ -104,15 +119,10 @@ const ServerMessage$json = {
   '2': [
     {'1': 'event', '3': 1, '4': 1, '5': 11, '6': '.ramen.EventEnvelope', '9': 0, '10': 'event'},
     {'1': 'heartbeat_ack', '3': 2, '4': 1, '5': 11, '6': '.ramen.HeartbeatAck', '9': 0, '10': 'heartbeatAck'},
+    {'1': 'subscribe_response', '3': 3, '4': 1, '5': 11, '6': '.ramen.SubscribeResponse', '9': 0, '10': 'subscribeResponse'},
+    {'1': 'error', '3': 4, '4': 1, '5': 11, '6': '.ramen.Error', '9': 0, '10': 'error'},
   ],
   '8': [
     {'1': 'message'},
   ],
 };
-
-/// Descriptor for `ServerMessage`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List serverMessageDescriptor = $convert.base64Decode(
-    'Cg1TZXJ2ZXJNZXNzYWdlEiwKBWV2ZW50GAEgASgLMhQucmFtZW4uRXZlbnRFbnZlbG9wZUgAUg'
-    'VldmVudBI6Cg1oZWFydGJlYXRfYWNrGAIgASgLMhMucmFtZW4uSGVhcnRiZWF0QWNrSABSDGhl'
-    'YXJ0YmVhdEFja0IJCgdtZXNzYWdl');
-
