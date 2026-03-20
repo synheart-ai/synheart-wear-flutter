@@ -43,10 +43,6 @@ void main() {
       );
     });
 
-    test('ensurePermissions does not throw', () async {
-      await expectLater(adapter.ensurePermissions(), completes);
-    });
-
     test('readSnapshot returns null when not connected', () async {
       // No userId set on the provider, so it should return null
       final result = await adapter.readSnapshot();

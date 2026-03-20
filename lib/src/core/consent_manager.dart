@@ -50,11 +50,31 @@ class ConsentManager {
   static final Map<String, DateTime> _consentTimestamps = {};
 
   /// Request consent for specific permission types
+  ///
+  /// If all requested permissions are already granted (from a prior call),
+  /// returns the cached status without triggering another native dialog.
   static Future<Map<PermissionType, ConsentStatus>> requestConsent(
     Set<PermissionType> permissions, {
     String? reason,
   }) async {
     final results = <PermissionType, ConsentStatus>{};
+
+    // Short-circuit: if every requested permission is already granted, skip
+    // the native dialog to avoid duplicate HealthKit authorization prompts.
+    //
+    // Only short-circuit if those cached grants are still "valid" according
+    // to our expiry policy. Otherwise, fall through and refresh the platform
+    // authorization call (which typically won't re-prompt if already granted)
+    // and refresh timestamps.
+    final allAlreadyGranted = permissions.every((p) {
+      return _permissions[p] == ConsentStatus.granted && isConsentValid(p);
+    });
+    if (allAlreadyGranted) {
+      for (final permission in permissions) {
+        results[permission] = ConsentStatus.granted;
+      }
+      return results;
+    }
 
     try {
       // Use health package for real permission requests

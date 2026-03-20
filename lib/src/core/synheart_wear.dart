@@ -69,13 +69,8 @@ class SynheartWear {
     }
 
     try {
-      // Request necessary permissions
-
+      // Request necessary permissions (single call — handles all types)
       await _requestPermissions();
-
-      // Initialize adapters
-
-      await _initializeAdapters();
 
       final testData = <WearMetrics?>[];
       for (final adapter in _enabledAdapters()) {
@@ -330,13 +325,6 @@ class SynheartWear {
         .where(_adapterRegistry.containsKey)
         .map((d) => _adapterRegistry[d]!)
         .toList();
-  }
-
-  /// Initialize enabled adapters
-  Future<void> _initializeAdapters() async {
-    for (final adapter in _enabledAdapters()) {
-      await adapter.ensurePermissions();
-    }
   }
 
   /// Start the streaming timer

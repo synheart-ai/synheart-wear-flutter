@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:synheart_wear/synheart_wear.dart';
-import 'health_adapter.dart';
 
 class HealthKitPlatform {
   /// Request permissions using health package (v13.2.1)

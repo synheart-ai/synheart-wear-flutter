@@ -21,12 +21,6 @@ abstract class WearAdapter {
     return supportedPermissions;
   }
 
-  /// Ensure required permissions are granted for this adapter
-  ///
-  /// Throws [PermissionDeniedError] if permissions are denied.
-  /// Throws [DeviceUnavailableError] if the device/service is unavailable.
-  Future<void> ensurePermissions();
-
   /// Read a snapshot of health metrics from the device
   ///
   /// [isRealTime] - If true, attempts to get the most recent real-time data
