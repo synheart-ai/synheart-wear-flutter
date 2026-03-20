@@ -129,6 +129,9 @@ export 'src/adapters/garmin/garmin.dart';
 // Generic wearable device types
 export 'src/models/wearable_device.dart';
 
+// HealthKit / Health Connect
+export 'src/adapters/health_adapter.dart';
+
 // BLE Heart Rate Monitor
 export 'src/adapters/ble_hrm_models.dart';
 export 'src/adapters/ble_hrm_bridge.dart';
