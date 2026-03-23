@@ -106,11 +106,18 @@ vendor/flux/
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
 
+# Secrets & credentials
+*.asc
+*.key
+.env
+.env.*
+!.env.example
+
 # FVM Version Cache
 .fvm/
 .fvmrc
 
-# VS Code
+# VS Code (user-specific)
 .vscode/settings.json
 .vscode/launch.json
 .vscode/tasks.json

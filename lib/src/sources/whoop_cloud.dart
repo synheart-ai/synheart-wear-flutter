@@ -15,28 +15,42 @@ class WhoopProvider {
   static const String _userIdKey = 'whoop_user_id';
   static const String _baseUrlKey = 'sdk_base_url';
   static const String _appIdKey = 'sdk_app_id';
+  static const String _apiKeyKey = 'sdk_api_key';
+  static const String _projectIdKey = 'sdk_project_id';
   static const String _redirectUriKey = 'sdk_redirect_uri';
 
   // Default values
-  // static const String defaultBaseUrl = 'https://wear-service-dev.synheart.io';
-  static const String defaultBaseUrl =
-      'https://wear-service-synheart.onrender.com';
+  static const String defaultBaseUrl = 'https://wear-service-dev.synheart.io';
   static const String defaultRedirectUri = 'synheart://oauth/callback';
 
   String baseUrl;
   String? redirectUri;
   String appId; // REQUIRED
+  String apiKey; // REQUIRED - sent as x-api-key on every request
+  String? projectId; // Optional - for WHOOP data queries
   String? userId;
   final bool _baseUrlExplicitlyProvided;
+
+  /// Base URL with /api/v1 suffix for all API requests (auth, data, events).
+  String get _apiBase {
+    final b = baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+    return '$b/api/v1';
+  }
 
   WhoopProvider({
     String? baseUrl,
     String? appId,
+    String? apiKey,
+    String? projectId,
     String? redirectUri,
     this.userId,
     bool loadFromStorage = true,
   }) : baseUrl = baseUrl ?? defaultBaseUrl,
-       appId = appId ?? 'app_corporate-wellness_and_JOGayA',
+       appId = appId ?? 'app_test_ios_XvHE1g',
+       apiKey = apiKey ?? '',
+       projectId = projectId,
        redirectUri = redirectUri ?? defaultRedirectUri,
        _baseUrlExplicitlyProvided = baseUrl != null {
     logDebug('🔧 WhoopProvider initialized:');
@@ -44,6 +58,7 @@ class WhoopProvider {
     logDebug('  appId: $appId');
     logDebug('  redirectUri: $redirectUri');
     logDebug('  userId: $userId');
+    logDebug('  projectId: $projectId');
     logDebug('  loadFromStorage: $loadFromStorage');
     logDebug('  baseUrl explicitly provided: $_baseUrlExplicitlyProvided');
     if (loadFromStorage) {
@@ -63,6 +78,8 @@ class WhoopProvider {
       // Load configuration
       final savedBaseUrl = prefs.getString(_baseUrlKey);
       final savedAppId = prefs.getString(_appIdKey);
+      final savedApiKey = prefs.getString(_apiKeyKey);
+      final savedProjectId = prefs.getString(_projectIdKey);
       final savedRedirectUri = prefs.getString(_redirectUriKey);
 
       logDebug('💾 [STORAGE] Loaded from storage:');
@@ -71,40 +88,24 @@ class WhoopProvider {
       logDebug('  savedRedirectUri: $savedRedirectUri');
 
       if (savedBaseUrl != null) {
-        // If baseUrl was explicitly provided, don't override it, but still migrate storage
+        final isDeprecatedUrl = savedBaseUrl.contains(
+          'synheart-wear-service-leatest.onrender.com',
+        );
         if (_baseUrlExplicitlyProvided) {
-          // Migrate storage to new baseUrl if it's the old one
-          if (savedBaseUrl.contains(
-                'synheart-wear-service-leatest.onrender.com',
-              ) ||
-              savedBaseUrl != defaultBaseUrl) {
+          if (isDeprecatedUrl) {
             logWarning(
               '🔄 [STORAGE] Migrating stored baseUrl (keeping explicit baseUrl)',
             );
-            logWarning('  Stored (old): $savedBaseUrl');
-            logWarning('  Using (explicit): $baseUrl');
-            logWarning('  New default: $defaultBaseUrl');
-            // Save the new baseUrl to storage for future use
             await prefs.setString(_baseUrlKey, defaultBaseUrl);
-            logWarning('  ✅ Migrated stored baseUrl');
           }
           logDebug('  ✅ Keeping explicitly provided baseUrl: $baseUrl');
         } else {
-          // Migrate from old baseUrl to new one
-          if (savedBaseUrl.contains(
-                'synheart-wear-service-leatest.onrender.com',
-              ) ||
-              savedBaseUrl != defaultBaseUrl) {
+          if (isDeprecatedUrl) {
             logWarning(
-              '🔄 [STORAGE] Migrating baseUrl from old value to new default',
+              '🔄 [STORAGE] Migrating baseUrl from deprecated value to default',
             );
-            logWarning('  Old: $savedBaseUrl');
-            logWarning('  New: $defaultBaseUrl');
-            // Update to new baseUrl
             baseUrl = defaultBaseUrl;
-            // Save the new baseUrl to storage
             await prefs.setString(_baseUrlKey, defaultBaseUrl);
-            logWarning('  ✅ Migrated and saved new baseUrl');
           } else {
             baseUrl = savedBaseUrl;
             logDebug('  ✅ Using saved baseUrl: $baseUrl');
@@ -114,6 +115,14 @@ class WhoopProvider {
       if (savedAppId != null) {
         appId = savedAppId;
         logDebug('  ✅ Using saved appId: $appId');
+      }
+      if (savedApiKey != null) {
+        apiKey = savedApiKey;
+        logDebug('  ✅ Using saved apiKey');
+      }
+      if (savedProjectId != null) {
+        projectId = savedProjectId;
+        logDebug('  ✅ Using saved projectId: $projectId');
       }
       if (savedRedirectUri != null) {
         redirectUri = savedRedirectUri;
@@ -175,10 +184,23 @@ class WhoopProvider {
     }
   }
 
+  /// Security headers for every request (Managed OAuth v2).
+  Map<String, String> _authHeaders() {
+    final h = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    if (appId.isNotEmpty) h['x-app-id'] = appId;
+    if (apiKey.isNotEmpty) h['x-api-key'] = apiKey;
+    return h;
+  }
+
   /// Save configuration to local storage
   Future<void> saveConfiguration({
     String? baseUrl,
     String? appId,
+    String? apiKey,
+    String? projectId,
     String? redirectUri,
   }) async {
     try {
@@ -192,6 +214,19 @@ class WhoopProvider {
       if (appId != null) {
         await prefs.setString(_appIdKey, appId);
         this.appId = appId;
+      }
+
+      if (apiKey != null) {
+        await prefs.setString(_apiKeyKey, apiKey);
+        this.apiKey = apiKey;
+      }
+
+      if (projectId != null) {
+        await prefs.setString(_projectIdKey, projectId);
+        this.projectId = projectId;
+      } else if (projectId == null) {
+        await prefs.remove(_projectIdKey);
+        this.projectId = null;
       }
 
       if (redirectUri != null) {
@@ -210,6 +245,8 @@ class WhoopProvider {
       return {
         'baseUrl': prefs.getString(_baseUrlKey),
         'appId': prefs.getString(_appIdKey),
+        'apiKey': prefs.getString(_apiKeyKey),
+        'projectId': prefs.getString(_projectIdKey),
         'redirectUri': prefs.getString(_redirectUriKey),
       };
     } catch (e) {
@@ -217,25 +254,34 @@ class WhoopProvider {
     }
   }
 
+  /// Call when app receives success from return URL deep link (Managed OAuth v2).
+  /// Wear service completes token exchange and redirects to platform return URL;
+  /// app parses deep link and calls this to mark user connected.
+  Future<void> markConnected(String userId) async {
+    await saveUserId(userId);
+  }
+
   /// Reload configuration and userId from storage
   Future<void> reloadFromStorage() async {
     await _loadFromStorage();
   }
 
-  // 1. Get authorization URL using new unified "Managed" OAuth endpoint
-  /// Initiates OAuth connection using POST /api/v1/auth/connect/whoop
-  /// Returns the authorization URL and state from backend
-  Future<Map<String, String>> initiateOAuthConnection() async {
+  /// Managed OAuth v2: POST /auth/connect/whoop with app_id, user_id.
+  /// Returns authorization_url and state. Wear service handles callback and
+  /// redirects to platform-configured return URL; app calls [markConnected] when it receives success.
+  Future<Map<String, String>> initiateOAuthConnection({String? userId}) async {
+    final effectiveUserId = userId ?? this.userId;
     logWarning('🔐 [AUTH] Starting initiateOAuthConnection (WHOOP)');
-    logDebug('  baseUrl: $baseUrl');
+    logDebug('  baseUrl: $baseUrl _apiBase: $_apiBase');
     logDebug('  appId: $appId');
-    logDebug('  userId: $userId');
+    logDebug('  userId: $effectiveUserId');
 
-    final serviceUrl = Uri.parse('$baseUrl/api/v1/auth/connect/whoop');
+    final serviceUrl = Uri.parse('$_apiBase/auth/connect/whoop');
 
-    final requestBody = {
+    final requestBody = <String, dynamic>{
       'app_id': appId,
-      if (userId != null) 'user_id': userId!,
+      if (effectiveUserId != null && effectiveUserId.isNotEmpty)
+        'user_id': effectiveUserId,
     };
 
     logWarning('📡 [AUTH] POST to: $serviceUrl');
@@ -244,7 +290,7 @@ class WhoopProvider {
     try {
       final response = await http.post(
         serviceUrl,
-        headers: {'Content-Type': 'application/json'},
+        headers: _authHeaders(),
         body: jsonEncode(requestBody),
       );
 
@@ -297,13 +343,13 @@ class WhoopProvider {
     }
   }
 
-  /// Start OAuth flow: initiate connection, get URL, and launch browser
-  /// Returns the state string from backend for tracking the OAuth callback
-  Future<String> startOAuthFlow() async {
+  /// Start OAuth flow: initiate connection, get URL, and launch browser.
+  /// [userId] optional; passed to POST /auth/connect/whoop.
+  Future<String> startOAuthFlow({String? userId}) async {
     logWarning('🚀 [AUTH] Starting OAuth flow (WHOOP)');
 
     try {
-      final result = await initiateOAuthConnection();
+      final result = await initiateOAuthConnection(userId: userId);
       final authorizationUrl = result['authorization_url']!;
       final state = result['state']!;
 
@@ -341,12 +387,14 @@ class WhoopProvider {
     }
   }
 
-  /// Connect method (matches documentation API)
-  /// Starts OAuth flow and returns state
-  Future<String> connect([dynamic context]) async {
+  /// Connect: initiates Managed OAuth v2, returns auth URL (and opens browser).
+  /// [userId] optional; if provided used in connect request and can be stored after success.
+  /// Returns state string. After user completes login, wear service redirects to return URL;
+  /// app parses deep link and calls [markConnected(userId)] or [handleDeepLinkCallback(uri)].
+  Future<String> connect([dynamic context, String? userId]) async {
     logDebug('🔌 [AUTH] connect() called');
     try {
-      final state = await startOAuthFlow();
+      final state = await startOAuthFlow(userId: userId);
       logDebug('✅ [AUTH] connect() completed, state: $state');
       return state;
     } catch (e, stackTrace) {
@@ -355,25 +403,25 @@ class WhoopProvider {
     }
   }
 
-  /// Handle OAuth callback from deep link
-  /// Backend handles code exchange automatically and redirects to app's redirect_uri
-  /// Deep link format: myapp://callback?status=success&user_id=xxx
-  /// or: myapp://callback?status=error&error=error_message
+  /// Handle return URL deep link after Managed OAuth v2.
+  /// Wear service redirects to platform-configured return URL with success and user_id.
+  /// Supports ?status=success&user_id=xxx or ?success=true&user_id=xxx.
   Future<String?> handleDeepLinkCallback(Uri uri) async {
     logWarning('🔄 [AUTH] Handling deep link callback (WHOOP)');
     logWarning('  URI: $uri');
 
-    // Extract status and user_id from deep link
     final status = uri.queryParameters['status'];
+    final success = uri.queryParameters['success'];
     final userID = uri.queryParameters['user_id'];
     final error = uri.queryParameters['error'];
 
-    logWarning('🔍 [AUTH] Callback parameters:');
-    logWarning('  status: $status');
-    logWarning('  userID: $userID');
-    logWarning('  error: $error');
+    final isSuccess = status == 'success' || success == 'true';
 
-    if (status == 'success' && userID != null) {
+    logWarning(
+      '🔍 [AUTH] Callback parameters: status=$status success=$success userID=$userID error=$error',
+    );
+
+    if (isSuccess && userID != null && userID.isNotEmpty) {
       logWarning('✅ [AUTH] Connection successful, saving userId: $userID');
       await saveUserId(userID);
       logWarning('💾 [AUTH] userId saved successfully');
@@ -682,6 +730,8 @@ class WhoopProvider {
     };
   }
 
+  /// GET /whoop/data/{user_id}/{type} with app_id, project_id, start, end, limit, cursor.
+  /// x-app-id and x-api-key sent on every request.
   Future<Map<String, dynamic>> _fetch(
     String type,
     String userId,
@@ -690,19 +740,20 @@ class WhoopProvider {
     int limit,
     String? cursor,
   ) async {
-    final params = {
+    final params = <String, String>{
       'app_id': appId,
+      if (projectId != null && projectId!.isNotEmpty) 'project_id': projectId!,
       if (start != null) 'start': start.toUtc().toIso8601String(),
       if (end != null) 'end': end.toUtc().toIso8601String(),
       'limit': limit.toString(),
-      if (cursor != null) 'cursor': cursor,
+      if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
     };
 
     final uri = Uri.parse(
-      '$baseUrl/api/v1/whoop/data/$userId/$type',
+      '$_apiBase/whoop/data/$userId/$type',
     ).replace(queryParameters: params);
     logDebug('WHOOP data request URI: $uri');
-    final res = await http.get(uri);
+    final res = await http.get(uri, headers: _authHeaders());
     logDebug('WHOOP data response: ${res.body}');
     if (res.statusCode != 200) throw Exception(res.body);
     final data = jsonDecode(res.body);
@@ -1029,12 +1080,12 @@ class WhoopProvider {
     }
   }
 
-  // 4. Disconnect
+  /// Disconnect WHOOP integration (x-app-id and x-api-key sent).
   Future<void> disconnect(String userId) async {
     final uri = Uri.parse(
-      '$baseUrl/api/v1/whoop/oauth/disconnect',
+      '$_apiBase/whoop/oauth/disconnect',
     ).replace(queryParameters: {'user_id': userId, 'app_id': appId});
-    final res = await http.delete(uri);
+    final res = await http.delete(uri, headers: _authHeaders());
     if (res.statusCode != 200) throw Exception(res.body);
   }
 
@@ -1060,8 +1111,9 @@ class WhoopProvider {
     List<String>? vendors,
   }) {
     final subscriptionService = EventSubscriptionService(
-      baseUrl: baseUrl,
+      baseUrl: _apiBase,
       appId: appId,
+      apiKey: apiKey,
     );
     return subscriptionService.subscribe(
       userId: userId ?? this.userId,

@@ -123,6 +123,10 @@ export 'src/sources/garmin_cloud.dart';
 export 'src/sources/event_subscription.dart';
 export 'src/adapters/android_health_helper.dart';
 
+// RAMEN (gRPC) and Wear Service (REST) per backend integration guide
+export 'src/ramen/ramen_client.dart';
+export 'src/wear/wear_service_client.dart';
+
 // Garmin SDK adapter (public facade only)
 export 'src/adapters/garmin/garmin.dart';
 
@@ -135,4 +139,3 @@ export 'src/adapters/health_adapter.dart';
 // BLE Heart Rate Monitor
 export 'src/adapters/ble_hrm_models.dart';
 export 'src/adapters/ble_hrm_bridge.dart';
-
