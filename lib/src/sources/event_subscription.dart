@@ -19,22 +19,34 @@ class WearServiceEvent {
   }
 }
 
-/// SSE subscription service for wear service events
+/// SSE subscription service for wear service events.
 ///
-/// Subscribes to Server-Sent Events (SSE) from the wear service to receive
-/// real-time webhook events from WHOOP and Garmin.
+/// Subscribes to Server-Sent Events (SSE). Real-time Garmin data is also
+/// delivered via RAMEN gRPC when app is active.
 ///
-/// Per documentation: GET /api/v1/events/subscribe?app_id={app_id}
+/// Every request sends x-app-id and x-api-key (Managed OAuth v2).
 class EventSubscriptionService {
   final String baseUrl;
   final String appId;
+  final String apiKey;
   StreamController<WearServiceEvent>? _eventController;
   http.Client? _client;
   StreamSubscription<List<int>>? _streamSubscription;
   bool _isSubscribed = false;
   bool _isDisposed = false;
 
-  EventSubscriptionService({required this.baseUrl, required this.appId});
+  EventSubscriptionService({
+    required this.baseUrl,
+    required this.appId,
+    this.apiKey = '',
+  });
+
+  Map<String, String> _authHeaders() {
+    final h = <String, String>{'Accept': 'text/event-stream', 'Cache-Control': 'no-cache'};
+    if (appId.isNotEmpty) h['x-app-id'] = appId;
+    if (apiKey.isNotEmpty) h['x-api-key'] = apiKey;
+    return h;
+  }
 
   /// Subscribe to SSE events
   ///
@@ -90,7 +102,7 @@ class EventSubscriptionService {
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
     final uri = Uri.parse(
-      '$cleanBaseUrl/api/v1/events/subscribe',
+      '$cleanBaseUrl/events/subscribe',
     ).replace(queryParameters: params);
 
     _client = http.Client();
@@ -99,8 +111,7 @@ class EventSubscriptionService {
       logDebug('Subscribing to SSE: $uri');
 
       final request = http.Request('GET', uri);
-      request.headers['Accept'] = 'text/event-stream';
-      request.headers['Cache-Control'] = 'no-cache';
+      _authHeaders().forEach((k, v) => request.headers[k] = v);
 
       final response = await _client!.send(request);
 
