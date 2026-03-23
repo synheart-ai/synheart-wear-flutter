@@ -29,25 +29,33 @@ enum RamenConnectionState {
   reconnecting,
 }
 
-/// Parsed event from RAMEN (payload is JSON).
+/// Parsed event from RAMEN (payload is bytes from server, decoded as UTF-8 JSON).
 class RamenEvent {
   RamenEvent({
     required this.eventId,
     required this.seq,
+    required this.provider,
+    required this.eventType,
     required this.payloadJson,
     this.payload,
+    this.isReplay = false,
   });
 
   final String eventId;
   final Int64 seq;
+  final String provider;
+  final String eventType;
   final String payloadJson;
   final Map<String, dynamic>? payload;
+  final bool isReplay;
 
   static RamenEvent fromEnvelope(EventEnvelope envelope) {
+    String payloadJson = '';
     Map<String, dynamic>? payload;
     try {
       if (envelope.payload.isNotEmpty) {
-        payload = jsonDecode(envelope.payload) as Map<String, dynamic>?;
+        payloadJson = utf8.decode(envelope.payload);
+        payload = jsonDecode(payloadJson) as Map<String, dynamic>?;
       }
     } catch (_) {
       /* leave payload null */
@@ -55,8 +63,11 @@ class RamenEvent {
     return RamenEvent(
       eventId: envelope.eventId,
       seq: envelope.seq,
-      payloadJson: envelope.payload,
+      provider: envelope.provider,
+      eventType: envelope.eventType,
+      payloadJson: payloadJson,
       payload: payload,
+      isReplay: envelope.hasDelivery() && envelope.delivery.isReplay,
     );
   }
 }
@@ -79,6 +90,8 @@ class RamenClient {
     this.heartbeatInterval = const Duration(seconds: 30),
     this.heartbeatMissedAttempts = 2,
     this.logResponses = false,
+    this.providers = const [],
+    this.eventTypes = const [],
   });
 
   final String host;
@@ -93,9 +106,13 @@ class RamenClient {
   final int heartbeatMissedAttempts;
   /// When true, logs every server message (subscribe_response, event, heartbeat_ack, error) via the SDK logger.
   final bool logResponses;
+  /// Optional: filter events by provider (e.g. ["whoop", "garmin"]).
+  final List<String> providers;
+  /// Optional: filter events by type (e.g. ["sleep.updated"]).
+  final List<String> eventTypes;
 
   ClientChannel? _channel;
-  RamenServiceClient? _client;
+  RAMENServiceClient? _client;
   StreamSubscription<ServerMessage>? _subscription;
   StreamController<ClientMessage>? _requestController;
   final StreamController<RamenEvent> _eventController =
@@ -177,15 +194,18 @@ class RamenClient {
     _channel = useTls
         ? ClientChannel(host, port: port, options: const ChannelOptions(credentials: ChannelCredentials.secure()))
         : ClientChannel(host, port: port);
-    _client = RamenServiceClient(_channel!);
+    _client = RAMENServiceClient(_channel!);
 
     final lastAckSeq = await lastSeq;
     final subscribe = ClientMessage()
       ..subscribe = (SubscribeRequest()
+        ..token = '' // Auth via metadata headers
         ..appId = appId
-        ..lastSeq = lastAckSeq
+        ..userId = userId
         ..deviceId = deviceId
-        ..userId = userId);
+        ..lastSeq = lastAckSeq
+        ..providers.addAll(providers)
+        ..eventTypes.addAll(eventTypes));
     // One SubscribeRequest per connection, then only Ack/Heartbeat on _requestController
     Stream<ClientMessage> buildRequestStream() async* {
       yield subscribe;
@@ -246,7 +266,7 @@ class RamenClient {
 
   void _onSubscribeResponse(SubscribeResponse resp) {
     _logResponse('subscribe_response',
-        'connection_id=${resp.connectionId} heartbeat_interval_seconds=${resp.heartbeatIntervalSeconds} expires_at=${resp.hasExpiresAt() ? resp.expiresAt : "n/a"}');
+        'connection_id=${resp.connectionId} current_seq=${resp.currentSeq} heartbeat_interval_seconds=${resp.heartbeatIntervalSeconds} expires_at=${resp.hasExpiresAt() ? resp.expiresAt : "n/a"}');
     if (resp.heartbeatIntervalSeconds > 0) {
       _heartbeatTimer?.cancel();
       final intervalSeconds = resp.heartbeatIntervalSeconds.clamp(5, 300);
@@ -259,7 +279,7 @@ class RamenClient {
 
   void _onEvent(EventEnvelope envelope) {
     _logResponse('event',
-        'event_id=${envelope.eventId} seq=${envelope.seq} payload_length=${envelope.payload.length}');
+        'event_id=${envelope.eventId} seq=${envelope.seq} provider=${envelope.provider} event_type=${envelope.eventType} payload_length=${envelope.payload.length}');
     final ramenEvent = RamenEvent.fromEnvelope(envelope);
     _eventController.add(ramenEvent);
     _sendAck(envelope.seq);

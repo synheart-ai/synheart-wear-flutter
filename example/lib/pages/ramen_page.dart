@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:synheart_wear/synheart_wear.dart';
 
-// Read-only: pre-fill from Settings (nothing from RAMEN is saved to local storage)
-const String _sharedAppIdKey = 'sdk_app_id';
-const String _sharedApiKeyKey = 'sdk_api_key';
-// User ID is always read from Garmin/WHOOP local storage (same keys as synheart_wear package)
-const String _storageKeyGarminUserId = 'garmin_user_id';
-const String _storageKeyWhoopUserId = 'whoop_user_id';
+// Persistence keys for RAMEN config
+const String _keyHost = 'ramen_host';
+const String _keyPort = 'ramen_port';
+const String _keyAppId = 'ramen_app_id';
+const String _keyApiKey = 'ramen_api_key';
+const String _keyDeviceId = 'ramen_device_id';
+const String _keyUserId = 'ramen_user_id';
+const String _keyAutoConnect = 'ramen_auto_connect';
 
 class RamenPage extends StatefulWidget {
   const RamenPage({
@@ -24,13 +26,12 @@ class RamenPage extends StatefulWidget {
 }
 
 class _RamenPageState extends State<RamenPage> {
-  // Base URL: https://ramen-service-dev.synheart.io/ (host + port 443, TLS)
-  final _hostController =
-      TextEditingController(text: 'ramen-service-dev.synheart.io');
-  final _portController = TextEditingController(text: '443');
+  final _hostController = TextEditingController();
+  final _portController = TextEditingController();
   final _appIdController = TextEditingController();
   final _apiKeyController = TextEditingController();
   final _deviceIdController = TextEditingController();
+  final _userIdController = TextEditingController();
 
   RamenClient? _client;
   StreamSubscription<RamenEvent>? _eventSub;
@@ -43,49 +44,64 @@ class _RamenPageState extends State<RamenPage> {
   @override
   void initState() {
     super.initState();
-    _loadPrefs();
+    _loadConfig();
   }
 
-  /// User ID is always from local storage (Garmin or WHOOP). Nothing from RAMEN is saved.
-  Future<String> _getUserIdFromStorage() async {
+  Future<void> _loadConfig() async {
     final prefs = await SharedPreferences.getInstance();
-    final garmin = prefs.getString(_storageKeyGarminUserId);
-    if (garmin != null && garmin.isNotEmpty) return garmin;
-    final whoop = prefs.getString(_storageKeyWhoopUserId);
-    if (whoop != null && whoop.isNotEmpty) return whoop;
-    return '';
-  }
-
-  Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    _appIdController.text = prefs.getString(_sharedAppIdKey) ?? '';
-    _apiKeyController.text = prefs.getString(_sharedApiKeyKey) ?? '';
+    _hostController.text = prefs.getString(_keyHost) ?? 'ramen-service-dev.synheart.io';
+    _portController.text = prefs.getString(_keyPort) ?? '443';
+    _appIdController.text = prefs.getString(_keyAppId) ?? '';
+    _apiKeyController.text = prefs.getString(_keyApiKey) ?? '';
+    _deviceIdController.text = prefs.getString(_keyDeviceId) ?? '';
+    _userIdController.text = prefs.getString(_keyUserId) ?? '';
     if (mounted) setState(() {});
+
+    // Auto-connect if previously connected
+    if (prefs.getBool(_keyAutoConnect) == true && _hasRequiredFields()) {
+      _connect();
+    }
+  }
+
+  Future<void> _saveConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyHost, _hostController.text.trim());
+    await prefs.setString(_keyPort, _portController.text.trim());
+    await prefs.setString(_keyAppId, _appIdController.text.trim());
+    await prefs.setString(_keyApiKey, _apiKeyController.text.trim());
+    await prefs.setString(_keyDeviceId, _deviceIdController.text.trim());
+    await prefs.setString(_keyUserId, _userIdController.text.trim());
+  }
+
+  bool _hasRequiredFields() {
+    return _hostController.text.trim().isNotEmpty &&
+        _deviceIdController.text.trim().isNotEmpty &&
+        _userIdController.text.trim().isNotEmpty;
   }
 
   Future<void> _connect() async {
     final host = _hostController.text.trim();
     if (host.isEmpty) {
-      setState(() {
-        _error = 'Host required';
-      });
+      setState(() => _error = 'Host required');
       return;
     }
     final port = int.tryParse(_portController.text.trim()) ?? 443;
     final deviceId = _deviceIdController.text.trim();
     if (deviceId.isEmpty) {
-      setState(() {
-        _error = 'Device ID required (e.g. Android ID or UUID)';
-      });
+      setState(() => _error = 'Device ID required');
       return;
     }
-    final userId = await _getUserIdFromStorage();
+    final userId = _userIdController.text.trim();
     if (userId.isEmpty) {
-      setState(() {
-        _error = 'Connect Garmin or WHOOP first to get a user ID';
-      });
+      setState(() => _error = 'User ID required');
       return;
     }
+
+    // Save config so it persists across restarts
+    await _saveConfig();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoConnect, true);
+
     setState(() {
       _connecting = true;
       _error = null;
@@ -94,16 +110,6 @@ class _RamenPageState extends State<RamenPage> {
 
     final appId = _appIdController.text.trim();
     final apiKey = _apiKeyController.text.trim();
-    final payload = {
-      'host': host,
-      'port': port,
-      'appId': appId,
-      'apiKey': apiKey,
-      'deviceId': deviceId,
-      'userId': userId,
-      'useTls': port == 443,
-    };
-    debugPrint('RAMEN Connect payload: $payload');
 
     final client = RamenClient(
       host: host,
@@ -117,7 +123,6 @@ class _RamenPageState extends State<RamenPage> {
     );
     _client = client;
 
-    // Update status from connection state (connected = first server message received)
     _stateSub = client.connectionState.listen((state) {
       if (!mounted) return;
       setState(() {
@@ -126,17 +131,13 @@ class _RamenPageState extends State<RamenPage> {
           case RamenConnectionState.connecting:
             _status = 'Connecting…';
             _error = null;
-            break;
           case RamenConnectionState.connected:
             _status = 'Connected';
             _error = null;
-            break;
           case RamenConnectionState.disconnected:
             _status = 'Disconnected';
-            break;
           case RamenConnectionState.reconnecting:
             _status = 'Reconnecting…';
-            break;
         }
       });
     });
@@ -152,7 +153,6 @@ class _RamenPageState extends State<RamenPage> {
 
     try {
       await client.connect();
-      // Status is updated via connectionState (Connected only after first server message)
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -165,6 +165,9 @@ class _RamenPageState extends State<RamenPage> {
   }
 
   Future<void> _disconnect() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoConnect, false);
+
     await _stateSub?.cancel();
     _stateSub = null;
     await _eventSub?.cancel();
@@ -188,13 +191,14 @@ class _RamenPageState extends State<RamenPage> {
     _appIdController.dispose();
     _apiKeyController.dispose();
     _deviceIdController.dispose();
+    _userIdController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -202,118 +206,55 @@ class _RamenPageState extends State<RamenPage> {
           icon: const Icon(Icons.menu),
           onPressed: widget.onMenuPressed,
         ),
-        title: const Text('RAMEN (gRPC)'),
+        title: const Text('RAMEN'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'How to use RAMEN',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '1. Set Base URL, App ID and API Key in Settings (same as WHOOP/Garmin). Connect Garmin or WHOOP first — user ID is read from local storage.\n'
-                    '2. Here, set Host (ramen-service-dev.synheart.io), Port 443 for https:// base URL, and App ID / API Key (pre-filled from Settings). Enter a Device ID.\n'
-                    '3. Tap Connect. When status shows "Connected", you’ll receive real-time events (alerts, daily summaries) below. Nothing on this page is saved to local storage.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurface,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+          // ── Config card ──
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    'Config',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  Text('Connection', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _hostController,
-                    decoration: const InputDecoration(
-                      labelText: 'Host',
-                      hintText: 'ramen-service-dev.synheart.io',
-                    ),
-                    keyboardType: TextInputType.url,
-                    enabled: _client == null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _portController,
-                    decoration: const InputDecoration(
-                      labelText: 'Port',
-                      hintText: '443 (https)',
-                    ),
-                    keyboardType: TextInputType.number,
-                    enabled: _client == null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _appIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'App ID (x-app-id)',
-                      hintText: 'app_test_ios_XvHE1g',
-                    ),
-                    enabled: _client == null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _apiKeyController,
-                    decoration: const InputDecoration(
-                      labelText: 'API Key (x-api-key)',
-                    ),
-                    obscureText: true,
-                    enabled: _client == null,
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _deviceIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Device ID',
-                      hintText: 'Unique device identifier',
-                    ),
-                    enabled: _client == null,
-                  ),
+                  _field(_hostController, 'Host', 'ramen-service-dev.synheart.io', TextInputType.url),
+                  _field(_portController, 'Port', '443', TextInputType.number),
+                  _field(_appIdController, 'App ID', 'x-app-id'),
+                  _field(_apiKeyController, 'API Key', 'x-api-key', null, true),
+                  _field(_deviceIdController, 'Device ID', 'e.g. pixel10-test'),
+                  _field(_userIdController, 'User ID', 'e.g. test-user-001'),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 12),
+
+          // ── Status + buttons ──
           Row(
             children: [
-              Text(
-                _status,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: _client != null ? Colors.green : colorScheme.onSurface,
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _client != null && _status == 'Connected'
+                      ? Colors.green
+                      : _connecting
+                          ? Colors.orange
+                          : Colors.grey,
                 ),
               ),
+              const SizedBox(width: 8),
+              Text(_status, style: theme.textTheme.bodyMedium),
               if (_error != null) ...[
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     _error!,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colorScheme.error,
-                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(color: cs.error),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -336,18 +277,15 @@ class _RamenPageState extends State<RamenPage> {
             ],
           ),
           const SizedBox(height: 16),
+
+          // ── Events ──
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Events (${_events.length})',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('Events (${_events.length})', style: theme.textTheme.titleMedium),
               if (_events.isNotEmpty)
                 TextButton(
-                  onPressed: () {
-                    setState(() => _events.clear());
-                  },
+                  onPressed: () => setState(() => _events.clear()),
                   child: const Text('Clear'),
                 ),
             ],
@@ -359,9 +297,11 @@ class _RamenPageState extends State<RamenPage> {
                 padding: const EdgeInsets.all(24),
                 child: Center(
                   child: Text(
-                    'Connect to receive RAMEN events (real-time alerts, daily summaries).',
+                    _client != null
+                        ? 'Waiting for events…'
+                        : 'Connect to receive real-time events.',
                     style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurface.withOpacity(0.7),
+                      color: cs.onSurfaceVariant,
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -370,27 +310,53 @@ class _RamenPageState extends State<RamenPage> {
             )
           else
             ..._events.take(50).map((e) {
-                  final payload = e.payloadJson;
-                  final displayPayload = payload.length > 120 ? '${payload.substring(0, 120)}…' : payload;
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      title: Text(
-                        e.eventId,
+              final payload = e.payloadJson;
+              final display = payload.length > 120 ? '${payload.substring(0, 120)}…' : payload;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  title: Text(
+                    '${e.provider} / ${e.eventType}',
+                    style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'seq=${e.seq} id=${e.eventId}${e.isReplay ? ' (replay)' : ''}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           fontFamily: 'monospace',
+                          fontSize: 10,
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
-                      subtitle: Text(
-                        displayPayload,
-                        style: theme.textTheme.bodySmall,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  );
-                }),
+                      if (display.isNotEmpty)
+                        Text(display, style: theme.textTheme.bodySmall, maxLines: 3, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  Widget _field(
+    TextEditingController controller,
+    String label,
+    String hint, [
+    TextInputType? keyboard,
+    bool obscure = false,
+  ]) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(labelText: label, hintText: hint),
+        keyboardType: keyboard,
+        obscureText: obscure,
+        enabled: _client == null,
       ),
     );
   }

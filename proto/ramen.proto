@@ -1,41 +1,29 @@
 syntax = "proto3";
 
-package ramen;
+package ramen.v1;
 
 import "google/protobuf/timestamp.proto";
 
-option java_package = "ai.synheart.ramen";
-option java_multiple_files = true;
+// =============================================================================
+// RAMEN Service - Real-time Asynchronous Messaging via ENgagement
+// =============================================================================
+// This service provides bidirectional streaming for real-time event delivery
+// to mobile SDKs. It follows Uber's RAMEN architecture principles.
 
-// Client -> Server messages (bidirectional stream)
-message SubscribeRequest {
-  int64 last_seq = 1;   // last_acknowledged_seq from local storage; 0 if first time
-  string device_id = 2; // unique hardware ID (IDFV on iOS, Android ID)
-  string user_id = 3;   // user identifier (in addition to X-app-id and X-api-key headers)
-  string app_id = 4;    // required; server validates; also sent as x-app-id header
+service RAMENService {
+  // Subscribe opens a persistent bidirectional stream for event delivery.
+  // The client sends SubscribeRequest initially, then Acks.
+  // The server streams EventEnvelopes to the client.
+  rpc Subscribe(stream ClientMessage) returns (stream ServerMessage);
+  
+  // Replay fetches historical events after a given sequence number.
+  // Used when a client reconnects and needs to catch up.
+  rpc Replay(ReplayRequest) returns (ReplayResponse);
 }
 
-enum AckStatus {
-  ACK_STATUS_UNSPECIFIED = 0;
-  ACK_STATUS_SUCCESS = 1;
-}
-
-message Ack {
-  int64 seq = 1;        // event.seq from EventEnvelope
-  AckStatus status = 2;
-}
-
-enum ErrorCode {
-  ERROR_CODE_UNSPECIFIED = 0;
-  ERROR_CODE_AUTH_FAILED = 1;
-  ERROR_CODE_INVALID_APP = 2;
-  ERROR_CODE_RATE_LIMITED = 3;
-  ERROR_CODE_INTERNAL = 4;
-}
-
-message Heartbeat {
-  google.protobuf.Timestamp timestamp = 1; // client time for RTT calculation
-}
+// =============================================================================
+// Client -> Server Messages
+// =============================================================================
 
 message ClientMessage {
   oneof message {
@@ -45,38 +33,154 @@ message ClientMessage {
   }
 }
 
-// Server -> Client messages
-message SubscribeResponse {
-  string connection_id = 1;
-  google.protobuf.Timestamp expires_at = 2;
-  int32 heartbeat_interval_seconds = 3;
+// SubscribeRequest is sent once when opening a stream.
+message SubscribeRequest {
+  // JWT or SDK token for authentication
+  string token = 1;
+  
+  // Unique device identifier (e.g., IDFV for iOS, Android ID)
+  string device_id = 2;
+  
+  // Application identifier
+  string app_id = 3;
+  
+  // User identifier
+  string user_id = 4;
+  
+  // Last successfully processed sequence number (for replay)
+  int64 last_seq = 5;
+  
+  // Optional: Filter events by provider (e.g., "whoop", "garmin")
+  repeated string providers = 6;
+  
+  // Optional: Filter events by type (e.g., "sleep.updated")
+  repeated string event_types = 7;
 }
 
-message EventEnvelope {
-  string event_id = 1;
-  int64 seq = 2;
-  string payload = 3;  // JSON
+// Ack acknowledges successful processing of an event.
+message Ack {
+  // The sequence number being acknowledged
+  int64 seq = 1;
+  
+  // Optional: Processing status
+  AckStatus status = 2;
 }
 
-message HeartbeatAck {
-  int64 rtt_ms = 1;
+enum AckStatus {
+  ACK_STATUS_UNSPECIFIED = 0;
+  ACK_STATUS_SUCCESS = 1;
+  ACK_STATUS_FAILED = 2;
+  ACK_STATUS_SKIPPED = 3;
 }
 
-message Error {
-  ErrorCode code = 1;
-  string message = 2;
-  bool fatal = 3;
+// Heartbeat keeps the connection alive.
+message Heartbeat {
+  // Client's current timestamp
+  google.protobuf.Timestamp timestamp = 1;
 }
+
+// =============================================================================
+// Server -> Client Messages
+// =============================================================================
 
 message ServerMessage {
   oneof message {
-    EventEnvelope event = 1;
-    HeartbeatAck heartbeat_ack = 2;
-    SubscribeResponse subscribe_response = 3;
+    SubscribeResponse subscribe_response = 1;
+    EventEnvelope event = 2;
+    HeartbeatAck heartbeat_ack = 3;
     Error error = 4;
   }
 }
 
-service RamenService {
-  rpc subscribe(stream ClientMessage) returns (stream ServerMessage);
+// SubscribeResponse confirms subscription setup.
+message SubscribeResponse {
+  // Connection ID for this stream session
+  string connection_id = 1;
+  
+  // Session expiry time
+  google.protobuf.Timestamp expires_at = 2;
+  
+  // Server's heartbeat interval expectation
+  int32 heartbeat_interval_seconds = 3;
+  
+  // Current highest sequence number for this user
+  int64 current_seq = 4;
+}
+
+// EventEnvelope wraps a single event for delivery.
+message EventEnvelope {
+  // Unique event identifier
+  string event_id = 1;
+  
+  // Monotonic sequence number within the user's stream
+  int64 seq = 2;
+  
+  // Provider (e.g., "whoop", "garmin")
+  string provider = 3;
+  
+  // Event type (e.g., "sleep.updated", "recovery.updated")
+  string event_type = 4;
+  
+  // Reference to raw payload (can be fetched via Wear Service)
+  string raw_id = 5;
+  
+  // Inline payload (if small enough, < 4KB)
+  bytes payload = 6;
+  
+  // Event creation timestamp
+  google.protobuf.Timestamp created_at = 7;
+  
+  // Delivery metadata
+  DeliveryMeta delivery = 8;
+}
+
+message DeliveryMeta {
+  // Number of delivery attempts
+  int32 attempt = 1;
+  
+  // First delivery attempt timestamp
+  google.protobuf.Timestamp first_sent_at = 2;
+  
+  // Whether this is a replay (historical) event
+  bool is_replay = 3;
+}
+
+// HeartbeatAck acknowledges a client heartbeat.
+message HeartbeatAck {
+  google.protobuf.Timestamp server_time = 1;
+  
+  // Round-trip time observed by server
+  int64 rtt_ms = 2;
+}
+
+// Error represents a stream-level or event-level error.
+message Error {
+  ErrorCode code = 1;
+  string message = 2;
+  bool fatal = 3; // If true, client should reconnect
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_AUTH_FAILED = 1;
+  ERROR_CODE_RATE_LIMITED = 2;
+  ERROR_CODE_INTERNAL = 3;
+  ERROR_CODE_STREAM_CLOSED = 4;
+}
+
+// =============================================================================
+// Replay RPC
+// =============================================================================
+
+message ReplayRequest {
+  string app_id = 1;
+  string user_id = 2;
+  int64 after_seq = 3;
+  int32 limit = 4; // Max 1000
+}
+
+message ReplayResponse {
+  repeated EventEnvelope events = 1;
+  bool has_more = 2;
+  int64 highest_seq = 3;
 }

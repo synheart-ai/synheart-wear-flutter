@@ -91,3 +91,18 @@ coverage/
 !**/ios/**/default.mode2v3
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
+
+# Secrets & credentials
+*.asc
+*.key
+.env
+.env.*
+!.env.example
+
+.fvm/
+
+.vscode/
+
+# Local vendor SDKs (do not publish)
+vendor/garmin/
+.fvmrc
