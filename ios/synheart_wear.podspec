@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'synheart_wear'
-  s.version          = '0.2.0'
+  s.version          = '0.3.1'
   s.summary          = 'Unified wearable SDK for Synheart (iOS plugin)'
   s.description      = <<-DESC
 Synheart Wear iOS plugin for HealthKit heartbeat series (RR) integration
@@ -16,15 +16,6 @@ and optional Garmin Companion SDK integration.
   s.platform = :ios, '16.0'
   s.swift_version = '5.10'
   s.static_framework = true
-
-  # Optional: bundle the native Rust Flux engine if the XCFramework is present
-  # AND no sibling plugin (synheart_behavior) already vendors the same binary.
-  flux_xcframework_path = '../vendor/flux/ios/SynheartFlux.xcframework'
-  flux_xcframework_absolute = File.expand_path(flux_xcframework_path, __dir__)
-  behavior_podspec = File.expand_path('../../synheart-behavior-dart/ios/synheart_behavior.podspec', __dir__)
-  if File.exist?(flux_xcframework_absolute) && !File.exist?(behavior_podspec)
-    s.vendored_frameworks = flux_xcframework_path
-  end
 
   # ============================================================================
   # GARMIN SDK INTEGRATION (Optional)

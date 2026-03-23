@@ -1,14 +1,19 @@
+import 'dart:async';
 import 'package:health/health.dart';
 import '../core/consent_manager.dart';
 import '../core/models.dart';
 import '../core/logger.dart';
-import 'dart:io'; // Add this import
+import 'dart:io';
 
 /// Adapter for the health package to handle HealthKit and Health Connect integration
 /// Supports health package v13.2.1 API
 class HealthAdapter {
   static final Health _health = Health();
   static bool _configured = false;
+  // Serializes concurrent requestAuthorization calls to prevent duplicate
+  // HealthKit dialogs (iOS crashes when two present simultaneously).
+  static Completer<bool>? _permissionCompleter;
+  static Set<PermissionType>? _inFlightPermissions;
 
   /// Configure the health package (required before any operations)
   static Future<void> _ensureConfigured() async {
@@ -85,28 +90,56 @@ class HealthAdapter {
   }
 
   /// Request permissions using health package (v13.2.1 API)
-  /// Always requests READ_WRITE access for all types
+  /// Always requests READ_WRITE access for all types.
+  ///
+  /// Serializes concurrent calls — if a request is already in flight,
+  /// subsequent callers wait for the same result instead of triggering a
+  /// second native dialog (which crashes iOS with "Attempt to present on...").
   static Future<bool> requestPermissions(
     Set<PermissionType> permissions,
   ) async {
+    // If a permission request is already in flight, wait for it.
+    if (_permissionCompleter != null) {
+      final inFlight = _inFlightPermissions ?? const <PermissionType>{};
+      // If the caller is asking for a subset of what is already being
+      // requested, just await the in-flight result.
+      if (permissions.difference(inFlight).isEmpty) {
+        return _permissionCompleter!.future;
+      }
+
+      // Otherwise, wait for the in-flight request to finish, then request
+      // again for the full set. This avoids returning "granted" for a smaller
+      // authorization request when the caller needs additional types.
+      await _permissionCompleter!.future;
+      return requestPermissions(permissions);
+    }
+
     final healthTypes = _mapPermissions(permissions);
     if (healthTypes.isEmpty) return false;
+
+    _permissionCompleter = Completer<bool>();
+    _inFlightPermissions = permissions;
 
     try {
       await _ensureConfigured();
 
-      // Default to READ_WRITE for all types
       final defaultPermissions = List<HealthDataAccess>.filled(
         healthTypes.length,
         HealthDataAccess.READ_WRITE,
       );
-      return await _health.requestAuthorization(
+      final granted = await _health.requestAuthorization(
         healthTypes,
         permissions: defaultPermissions,
       );
+      _permissionCompleter!.complete(granted);
+      return granted;
     } catch (e) {
       logError('Health permission request error', e);
+      _permissionCompleter!.complete(false);
       return false;
+    } finally {
+      _permissionCompleter = null;
+      _inFlightPermissions = null;
     }
   }
 

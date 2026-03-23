@@ -24,11 +24,6 @@ class FitbitAdapter implements WearAdapter {
   }
 
   @override
-  Future<void> ensurePermissions() async {
-    // TODO: OAuth and scopes.
-  }
-
-  @override
   Future<WearMetrics?> readSnapshot({
     bool isRealTime = false,
     DateTime? startTime,

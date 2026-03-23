@@ -22,6 +22,19 @@ class BleHrmProvider {
 
   bool _listening = false;
 
+  /// Request Bluetooth permission from the OS.
+  ///
+  /// On iOS, this triggers the system Bluetooth permission dialog by
+  /// creating a [CBCentralManager]. Returns `"granted"` or `"denied"`.
+  Future<String> requestPermission() async {
+    try {
+      final result = await _method.invokeMethod<String>('requestPermission');
+      return result ?? 'denied';
+    } on PlatformException catch (e) {
+      throw _mapError(e);
+    }
+  }
+
   /// Scan for nearby BLE heart rate monitor devices.
   ///
   /// [timeoutMs] — scan duration in milliseconds (default 5000).

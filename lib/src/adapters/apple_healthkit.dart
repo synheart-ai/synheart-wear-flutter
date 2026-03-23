@@ -1,6 +1,5 @@
 import 'dart:io';
 import '../../synheart_wear.dart';
-import 'health_adapter.dart';
 import 'wear_adapter.dart';
 import 'healthkit_rr_channel.dart';
 
@@ -43,32 +42,6 @@ class AppleHealthKitAdapter implements WearAdapter {
     } else {
       // iOS HealthKit supports all including distance
       return supportedPermissions;
-    }
-  }
-
-  @override
-  Future<void> ensurePermissions() async {
-    // Check if HealthKit/Health Connect is available
-    final isAvailable = await HealthAdapter.isAvailable();
-    if (!isAvailable) {
-      throw DeviceUnavailableError(
-        Platform.isAndroid
-            ? 'Health Connect is not available on this device'
-            : 'HealthKit is not available on this device',
-      );
-    }
-
-    // Request permissions using health package
-    // Use platform-specific permissions (exclude HRV on Android)
-    final granted = await HealthAdapter.requestPermissions(
-      _platformSupportedPermissions,
-    );
-    if (!granted) {
-      throw PermissionDeniedError(
-        Platform.isAndroid
-            ? 'Health Connect permissions were denied'
-            : 'HealthKit permissions were denied',
-      );
     }
   }
 

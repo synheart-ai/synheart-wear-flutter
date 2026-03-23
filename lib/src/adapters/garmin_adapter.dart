@@ -40,11 +40,6 @@ class GarminAdapter implements WearAdapter {
   }
 
   @override
-  Future<void> ensurePermissions() async {
-    // No-op: OAuth is handled separately via GarminProvider.connect()
-  }
-
-  @override
   Future<WearMetrics?> readSnapshot({
     bool isRealTime = false,
     DateTime? startTime,

@@ -175,9 +175,6 @@ class _GarminStubAdapter implements WearAdapter {
   Set<PermissionType> getPlatformSupportedPermissions() => const {};
 
   @override
-  Future<void> ensurePermissions() async {}
-
-  @override
   Future<WearMetrics?> readSnapshot({
     bool isRealTime = true,
     DateTime? startTime,

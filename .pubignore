@@ -18,6 +18,12 @@ example/build/
 .flutter-plugins-dependencies
 **/generated_plugin_registrant.dart
 
+# Generated documentation (host separately, not on pub.dev)
+doc/api/
+
+# Vendor / licensed SDKs / large artifacts (not shipped on pub.dev)
+vendor/
+
 # Platform-specific
 ios/Pods/
 ios/.symlinks/
@@ -25,7 +31,3 @@ android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 
 # User-specific
 **/xcuserdata/
-
-# Exclude desktop binaries from pub.dev package (too large, require manual setup anyway)
-# Desktop binaries are optional and need to be manually bundled or set via environment variables
-vendor/flux/desktop/

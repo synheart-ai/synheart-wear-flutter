@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../adapters/wear_adapter.dart';
@@ -12,8 +11,6 @@ import 'config.dart';
 import 'consent_manager.dart';
 import 'local_cache.dart';
 import 'logger.dart';
-import '../flux/flux_processor.dart';
-import '../flux/types.dart';
 
 /// Main SynheartWear SDK class implementing RFC specifications
 class SynheartWear {
@@ -22,16 +19,11 @@ class SynheartWear {
   final Normalizer _normalizer;
   StreamController<WearMetrics>? _hrStreamController;
   StreamController<WearMetrics>? _hrvStreamController;
-  StreamController<HsiPayload>? _fluxStreamController;
   Timer? _streamTimer;
 
   final Map<DeviceAdapter, WearAdapter> _adapterRegistry;
 
   Timer? _hrvTimer; // Separate timer for HRV
-  Timer? _fluxTimer; // Timer for Flux snapshots
-
-  /// Flux processor for HSI signal processing (lazy initialized)
-  FluxProcessor? _fluxProcessor;
 
   GarminHealth? _garminHealth;
 
@@ -77,13 +69,8 @@ class SynheartWear {
     }
 
     try {
-      // Request necessary permissions
-
+      // Request necessary permissions (single call — handles all types)
       await _requestPermissions();
-
-      // Initialize adapters
-
-      await _initializeAdapters();
 
       final testData = <WearMetrics?>[];
       for (final adapter in _enabledAdapters()) {
@@ -94,12 +81,20 @@ class SynheartWear {
             startTime: DateTime.now().subtract(const Duration(days: 7)),
             endTime: DateTime.now(),
           );
-          if (data != null) {
-          } else {}
+          if (data == null) {
+            logDebug(
+              'Initialization: ${adapter.id} returned no recent data snapshot.',
+            );
+          } else {
+            logDebug(
+              'Initialization: ${adapter.id} returned snapshot at ${data.timestamp.toIso8601String()}.',
+            );
+          }
 
           testData.add(data);
         } catch (e) {
           // Log warning but continue checking other adapters
+          logWarning('Initialization: ${adapter.id} snapshot check failed', e);
         }
       }
 
@@ -128,7 +123,10 @@ class SynheartWear {
       final absoluteAge = isFutureData ? -dataAge : dataAge;
 
       if (isFutureData) {
-      } else {}
+        logDebug(
+          'Initialization: latest data timestamp is in the future by ${absoluteAge.inSeconds}s; treating age as absolute.',
+        );
+      }
 
       if (absoluteAge > maxStaleAge) {
         throw SynheartWearError(
@@ -231,203 +229,6 @@ class SynheartWear {
     return _hrvStreamController!.stream;
   }
 
-  /// Read a Flux HSI snapshot for the specified time window
-  ///
-  /// Returns an HSI-compliant payload containing derived signals from wearable
-  /// data within the specified window.
-  ///
-  /// [windowMs] - Time window in milliseconds to aggregate data (default: 60000ms / 1 minute)
-  /// [vendor] - Source vendor for the data (required for HSI provenance)
-  /// [deviceId] - Device identifier for provenance tracking
-  /// [timezone] - User's timezone (e.g., "America/New_York")
-  /// [rawVendorJson] - Raw vendor JSON payload to process (if available)
-  ///
-  /// Throws [SynheartWearError] if Flux is not enabled in config.
-  ///
-  /// Example:
-  /// ```dart
-  /// final wear = SynheartWear(config: SynheartWearConfig(enableFlux: true));
-  /// final snapshot = await wear.readFluxSnapshot(
-  ///   windowMs: 60000,
-  ///   vendor: Vendor.whoop,
-  ///   deviceId: 'device-123',
-  ///   timezone: 'America/New_York',
-  ///   rawVendorJson: whoopApiResponse,
-  /// );
-  /// ```
-  Future<HsiPayload> readFluxSnapshot({
-    int windowMs = 60000,
-    required Vendor vendor,
-    required String deviceId,
-    required String timezone,
-    required String rawVendorJson,
-  }) async {
-    if (!config.enableFlux) {
-      throw SynheartWearError(
-        'Flux is not enabled. Set enableFlux: true in SynheartWearConfig.',
-        code: 'FLUX_DISABLED',
-      );
-    }
-
-    // Skip initialization when processing raw vendor JSON - Flux can process it directly
-    // without needing SDK data sources. Initialization is only needed for streaming/HRV features.
-    // Mark as initialized to prevent future initialization attempts
-    if (!_initialized) {
-      _initialized = true;
-    }
-
-    // Lazy initialize the Flux processor
-    _fluxProcessor ??= FluxProcessor();
-
-    try {
-      final List<HsiPayload> payloads;
-
-      switch (vendor) {
-        case Vendor.whoop:
-          final jsonStrings = _fluxProcessor!.processWhoop(
-            rawVendorJson,
-            timezone,
-            deviceId,
-          );
-          if (jsonStrings == null) {
-            throw SynheartWearError(
-              'Flux processing failed for WHOOP data.',
-              code: 'FLUX_PROCESSING_FAILED',
-            );
-          }
-          payloads = _parseHsiPayloads(jsonStrings);
-        case Vendor.garmin:
-          final jsonStrings = _fluxProcessor!.processGarmin(
-            rawVendorJson,
-            timezone,
-            deviceId,
-          );
-          if (jsonStrings == null) {
-            throw SynheartWearError(
-              'Flux processing failed for Garmin data.',
-              code: 'FLUX_PROCESSING_FAILED',
-            );
-          }
-          payloads = _parseHsiPayloads(jsonStrings);
-      }
-
-      if (payloads.isEmpty) {
-        throw SynheartWearError(
-          'No Flux data available for the specified window.',
-          code: 'NO_FLUX_DATA',
-        );
-      }
-
-      // Return the most recent payload
-      return payloads.last;
-    } catch (e) {
-      if (e is SynheartWearError) rethrow;
-      throw SynheartWearError('Failed to read Flux snapshot: $e');
-    }
-  }
-
-  /// Stream Flux HSI snapshots at regular intervals
-  ///
-  /// Returns a stream of HSI-compliant payloads at the specified interval.
-  ///
-  /// [windowMs] - Time window in milliseconds for each snapshot (default: 60000ms)
-  /// [interval] - How often to emit snapshots (default: 60 seconds)
-  /// [vendor] - Source vendor for the data
-  /// [deviceId] - Device identifier for provenance tracking
-  /// [timezone] - User's timezone
-  /// [fetchVendorData] - Callback to fetch fresh vendor JSON data for each snapshot
-  ///
-  /// Throws [SynheartWearError] if Flux is not enabled in config.
-  ///
-  /// Example:
-  /// ```dart
-  /// final stream = wear.streamFluxSnapshots(
-  ///   windowMs: 60000,
-  ///   interval: Duration(minutes: 1),
-  ///   vendor: Vendor.whoop,
-  ///   deviceId: 'device-123',
-  ///   timezone: 'America/New_York',
-  ///   fetchVendorData: () async => await whoopApi.fetchLatest(),
-  /// );
-  ///
-  /// await for (final snapshot in stream) {
-  ///   print('HRV: ${snapshot.windows.first.physiology.hrvRmssdMs}');
-  /// }
-  /// ```
-  Stream<HsiPayload> streamFluxSnapshots({
-    int windowMs = 60000,
-    Duration interval = const Duration(seconds: 60),
-    required Vendor vendor,
-    required String deviceId,
-    required String timezone,
-    required Future<String> Function() fetchVendorData,
-  }) {
-    if (!config.enableFlux) {
-      throw SynheartWearError(
-        'Flux is not enabled. Set enableFlux: true in SynheartWearConfig.',
-        code: 'FLUX_DISABLED',
-      );
-    }
-
-    _fluxStreamController ??= StreamController<HsiPayload>.broadcast();
-
-    // Start timer when first listener subscribes
-    if (!_fluxStreamController!.hasListener) {
-      _startFluxStreaming(
-        windowMs: windowMs,
-        interval: interval,
-        vendor: vendor,
-        deviceId: deviceId,
-        timezone: timezone,
-        fetchVendorData: fetchVendorData,
-      );
-    }
-
-    return _fluxStreamController!.stream;
-  }
-
-  /// Get the current Flux baselines (for persistence)
-  ///
-  /// Returns JSON string of baseline state that can be saved and restored.
-  /// Useful for maintaining baseline continuity across app restarts.
-  /// Returns null if Flux is not available.
-  ///
-  /// Throws [SynheartWearError] if Flux is not enabled or not initialized.
-  String? saveFluxBaselines() {
-    if (!config.enableFlux) {
-      throw SynheartWearError(
-        'Flux is not enabled. Set enableFlux: true in SynheartWearConfig.',
-        code: 'FLUX_DISABLED',
-      );
-    }
-
-    if (_fluxProcessor == null) {
-      throw SynheartWearError(
-        'Flux processor not initialized. Call readFluxSnapshot first.',
-        code: 'FLUX_NOT_INITIALIZED',
-      );
-    }
-
-    return _fluxProcessor!.saveBaselines();
-  }
-
-  /// Load previously saved Flux baselines
-  ///
-  /// [baselinesJson] - JSON string from saveFluxBaselines()
-  ///
-  /// Throws [SynheartWearError] if Flux is not enabled.
-  void loadFluxBaselines(String baselinesJson) {
-    if (!config.enableFlux) {
-      throw SynheartWearError(
-        'Flux is not enabled. Set enableFlux: true in SynheartWearConfig.',
-        code: 'FLUX_DISABLED',
-      );
-    }
-
-    _fluxProcessor ??= FluxProcessor();
-    _fluxProcessor!.loadBaselines(baselinesJson);
-  }
-
   /// Get cached sessions for analysis
   Future<List<WearMetrics>> getCachedSessions({
     DateTime? startDate,
@@ -490,13 +291,14 @@ class SynheartWear {
   /// Dispose resources
   void dispose() {
     _streamTimer?.cancel();
+    _streamTimer = null;
     _hrvTimer?.cancel();
-    _fluxTimer?.cancel();
+    _hrvTimer = null;
     _hrStreamController?.close();
+    _hrStreamController = null;
     _hrvStreamController?.close();
+    _hrvStreamController = null;
     _garminHealth?.dispose();
-    _fluxStreamController?.close();
-    _fluxProcessor = null;
     _initialized = false;
   }
 
@@ -525,13 +327,6 @@ class SynheartWear {
         .toList();
   }
 
-  /// Initialize enabled adapters
-  Future<void> _initializeAdapters() async {
-    for (final adapter in _enabledAdapters()) {
-      await adapter.ensurePermissions();
-    }
-  }
-
   /// Start the streaming timer
   void _startStreaming(Duration interval) {
     _streamTimer?.cancel();
@@ -543,11 +338,18 @@ class SynheartWear {
         return;
       }
 
+      final controller = _hrStreamController;
+      if (controller == null || controller.isClosed) {
+        _streamTimer?.cancel();
+        _streamTimer = null;
+        return;
+      }
+
       try {
         final metrics = await readMetrics(isRealTime: true);
-        _hrStreamController?.add(metrics);
+        if (!controller.isClosed) controller.add(metrics);
       } catch (e) {
-        _hrStreamController?.addError(e);
+        if (!controller.isClosed) controller.addError(e);
       }
     });
   }
@@ -556,8 +358,15 @@ class SynheartWear {
   void _startHrvStreaming(Duration windowSize) {
     _hrvTimer?.cancel();
     _hrvTimer = Timer.periodic(windowSize, (timer) async {
+      final controller = _hrvStreamController;
+      if (controller == null || controller.isClosed) {
+        _hrvTimer?.cancel();
+        _hrvTimer = null;
+        return;
+      }
+
       // Check if we still have subscribers
-      if (_hrvStreamController?.hasListener != true) {
+      if (!controller.hasListener) {
         _hrvTimer?.cancel();
         _hrvTimer = null;
         return;
@@ -571,80 +380,12 @@ class SynheartWear {
 
         // Emit metrics if any HRV data is present
         if (hrvSdnn != null || hrvRmssd != null) {
-          _hrvStreamController?.add(metrics);
+          if (!controller.isClosed) controller.add(metrics);
         }
       } catch (e) {
-        _hrvStreamController?.addError(e);
+        if (!controller.isClosed) controller.addError(e);
       }
     });
-  }
-
-  /// Start Flux streaming timer
-  void _startFluxStreaming({
-    required int windowMs,
-    required Duration interval,
-    required Vendor vendor,
-    required String deviceId,
-    required String timezone,
-    required Future<String> Function() fetchVendorData,
-  }) {
-    _fluxTimer?.cancel();
-    _fluxTimer = Timer.periodic(interval, (timer) async {
-      // Check if we still have subscribers
-      if (_fluxStreamController?.hasListener != true) {
-        _fluxTimer?.cancel();
-        _fluxTimer = null;
-        return;
-      }
-
-      try {
-        final rawJson = await fetchVendorData();
-        final snapshot = await readFluxSnapshot(
-          windowMs: windowMs,
-          vendor: vendor,
-          deviceId: deviceId,
-          timezone: timezone,
-          rawVendorJson: rawJson,
-        );
-        _fluxStreamController?.add(snapshot);
-      } catch (e) {
-        _fluxStreamController?.addError(e);
-      }
-    });
-  }
-
-  /// Parse HSI JSON strings into HsiPayload objects
-  List<HsiPayload> _parseHsiPayloads(List<String> jsonStrings) {
-    return jsonStrings.map((jsonStr) {
-      final json = _decodeJson(jsonStr);
-      return _hsiPayloadFromJson(json);
-    }).toList();
-  }
-
-  /// Decode JSON string to Map
-  Map<String, dynamic> _decodeJson(String jsonStr) {
-    final decoded = jsonDecode(jsonStr);
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    } else if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    } else if (decoded is List && decoded.isNotEmpty) {
-      // If Flux accidentally returns an array, take the first element
-      final first = decoded.first;
-      if (first is Map<String, dynamic>) {
-        return first;
-      } else if (first is Map) {
-        return Map<String, dynamic>.from(first);
-      }
-    }
-    throw FormatException(
-      'Expected JSON object but got ${decoded.runtimeType}: $jsonStr',
-    );
-  }
-
-  /// Convert JSON map to HsiPayload (HSI 1.0 format)
-  HsiPayload _hsiPayloadFromJson(Map<String, dynamic> json) {
-    return HsiPayload.fromJson(json);
   }
 
   /// Getter for testing timer state
@@ -654,6 +395,4 @@ class SynheartWear {
   @visibleForTesting
   bool get isHrvTimerActive => _hrvTimer?.isActive ?? false;
 
-  @visibleForTesting
-  bool get isFluxTimerActive => _fluxTimer?.isActive ?? false;
 }

@@ -19,7 +19,7 @@ migrate_working_dir/
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
-#.vscode/
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -95,6 +95,7 @@ android/libs/*.jar
 !android/libs/README.md
 !ios/Frameworks/README.md
 vendor/garmin/
+vendor/flux/
 
 # Garmin RTS companion (cloned at build time)
 .garmin/
@@ -104,3 +105,13 @@ vendor/garmin/
 !**/ios/**/default.mode2v3
 !**/ios/**/default.pbxuser
 !**/ios/**/default.perspectivev3
+
+# FVM Version Cache
+.fvm/
+.fvmrc
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/extensions.json

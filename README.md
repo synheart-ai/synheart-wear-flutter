@@ -1,6 +1,6 @@
 # Synheart Wear
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/synheart-ai/synheart_wear)
+[![Version](https://img.shields.io/badge/version-0.3.1-blue.svg)](https://github.com/synheart-ai/synheart_wear)
 [![Flutter](https://img.shields.io/badge/flutter-%3E%3D3.22.0-blue.svg)](https://flutter.dev)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
@@ -23,7 +23,7 @@
 
 ```yaml
 dependencies:
-  synheart_wear: ^0.3.0
+  synheart_wear: ^0.3.1
 ```
 
 ```bash
@@ -250,190 +250,12 @@ Add to `ios/Runner/Info.plist`:
 - ✅ Anonymized UUIDs
 - ✅ Right to forget (revoke & delete)
 
-## 🧠 Flux (HSI compute) 
+## 🧠 Flux (HSI compute)
 
-This package includes **Flux**, a compute pipeline that converts vendor payloads (WHOOP/Garmin) into **HSI 1.0 compliant human state signals**.
+This package **does not generate HSI** and **does not bundle Flux binaries**.
+**HSI is generated in Flux** (see the `synheart-flux` repo) and is typically orchestrated/validated in **Synheart Core**. 
 
-**For pub.dev users:** Flux native binaries are automatically included - no setup required! Just enable Flux in your config and start using it.
 
-**What Flux does:**
-- Transforms raw vendor data (WHOOP/Garmin) into standardized HSI 1.0 format
-- Organizes data into daily windows with sleep, physiology, and activity metrics
-- Provides baseline calculations for personalized insights
-- Ensures data privacy with on-device processing
-
-### Install (native Rust Flux binaries)
-
-Flux is implemented in **Rust** and called via Dart **FFI**. To activate Flux, your app must bundle the native library for your platform.
-
-#### For pub.dev Users (Most Developers)
-
-**✅ No setup required!** When you install `synheart_wear` from pub.dev, Flux native binaries are automatically included and bundled with your app. Just add the dependency and use Flux:
-
-```yaml
-dependencies:
-  synheart_wear: ^0.3.0
-```
-
-```dart
-final wear = SynheartWear(
-  config: SynheartWearConfig(enableFlux: true),
-);
-// Flux is ready to use!
-```
-
-#### For SDK Developers (Source Code)
-
-If you're developing the SDK itself or using it from source, you need to download Flux binaries:
-
-- Download the pinned Flux release artifacts into `vendor/flux/**` by running:
-
-```bash
-bash tool/fetch_flux_binaries.sh
-```
-
-- **Pinned version**: `vendor/flux/VERSION` (tag in the Flux repo)
-- **Private releases / rate limits (optional)**: set `FLUX_GITHUB_TOKEN`
-- **Override version (optional)**: set `FLUX_VERSION=vX.Y.Z`
-- **Override repo (optional)**: set `FLUX_REPO=org/repo`
-
-#### What gets bundled (by platform)
-
-- **Android**: `vendor/flux/android/jniLibs/<abi>/libsynheart_flux.so`  
-  Bundled automatically via `android/build.gradle` (`main.jniLibs.srcDirs += ['../vendor/flux/android/jniLibs']`).
-- **iOS**: `vendor/flux/ios/SynheartFlux.xcframework`  
-  Bundled automatically via `ios/synheart_wear.podspec` (adds `vendored_frameworks` when present).
-- **Desktop (optional)**:
-  - macOS: `vendor/flux/desktop/mac/macos-arm64/libsynheart_flux.dylib`
-  - Linux: `vendor/flux/desktop/linux/linux-x86_64/libsynheart_flux.so`
-  - Windows: `vendor/flux/desktop/win/synheart_flux.dll`
-
-#### Desktop runtime note (FFI loading)
-
-Vendoring a `.dylib/.so/.dll` in the package doesn’t automatically copy it into your desktop app bundle. If Flux isn’t found at runtime, either bundle/copy the library into your app, or set one of:
-
-- `SYNHEART_FLUX_LIB_PATH=/absolute/path/to/libsynheart_flux.(dylib|so)` (or `synheart_flux.dll`)
-- `SYNHEART_FLUX_VENDOR_DIR=/absolute/path/to/vendor/flux` (Flux will try `desktop/<platform>/...` under this directory)
-
-#### Where the binaries come from / custom builds
-
-- **Release artifacts**: [synheart-flux releases](https://github.com/synheart-ai/synheart-flux/releases)
-- **Custom binaries**: build Flux from source and drop the artifacts into the same `vendor/flux/**` layout (or point `SYNHEART_FLUX_LIB_PATH` at your built library).
-
-### Activate (runtime check)
-
-Flux will only run if the native library can be loaded. Check availability before calling:
-
-```dart
-import 'package:synheart_wear/flux.dart';
-
-if (!isFluxAvailable) {
-  // Common causes: missing .so / missing xcframework / not linked into the app.
-  throw Exception('Flux not available: $fluxLoadError');
-}
-```
-
-### Use (via SynheartWear - Recommended)
-
-The easiest way to use Flux is through `SynheartWear.readFluxSnapshot()`. This method handles fetching raw vendor data and converting it to HSI format:
-
-```dart
-import 'dart:convert';
-import 'package:synheart_wear/synheart_wear.dart';
-
-// Step 1: Fetch raw data from WHOOP or Garmin
-final whoopProvider = WhoopProvider(
-  appId: 'your-app-id',
-  userId: 'user-123',
-);
-final rawData = await whoopProvider.fetchRawDataForFlux(
-  start: DateTime.now().subtract(const Duration(days: 30)),
-  end: DateTime.now(),
-);
-final rawJson = jsonEncode(rawData);
-
-// Step 2: Process with Flux
-final wear = SynheartWear(
-  config: SynheartWearConfig(enableFlux: true),
-);
-final hsiSnapshot = await wear.readFluxSnapshot(
-  vendor: Vendor.whoop,
-  deviceId: 'whoop-device-123',
-  timezone: 'America/New_York',
-  rawVendorJson: rawJson,
-);
-
-// Step 3: Use HSI data
-print('HSI Version: ${hsiSnapshot.hsiVersion}');
-print('Windows: ${hsiSnapshot.windows.length}');
-print('Observed At: ${hsiSnapshot.observedAtUtc}');
-print('Computed At: ${hsiSnapshot.computedAtUtc}');
-
-// Access window data
-hsiSnapshot.windows.forEach((windowId, window) {
-  if (window.sleep != null) {
-    print('Sleep duration: ${window.sleep!.durationMinutes} min');
-  }
-  if (window.physiology != null) {
-    print('Resting HR: ${window.physiology!.restingHrBpm} bpm');
-  }
-  if (window.activity != null) {
-    print('Steps: ${window.activity!.steps}');
-  }
-});
-```
-
-**For Garmin:**
-```dart
-final garminProvider = GarminProvider(
-  appId: 'your-app-id',
-  userId: 'user-123',
-);
-final rawData = await garminProvider.fetchRawDataForFlux(
-  start: DateTime.now().subtract(const Duration(days: 30)),
-  end: DateTime.now(),
-);
-final rawJson = jsonEncode(rawData);
-
-final hsiSnapshot = await wear.readFluxSnapshot(
-  vendor: Vendor.garmin,
-  deviceId: 'garmin-device-456',
-  timezone: 'America/Los_Angeles',
-  rawVendorJson: rawJson,
-);
-```
-
-### Use (stateless - low-level API)
-
-```dart
-import 'package:synheart_wear/flux.dart';
-
-final hsiPayloads = whoopToHsiDaily(rawWhoopJson, 'America/New_York', 'device-123');
-// or:
-// final hsiPayloads = garminToHsiDaily(rawGarminJson, 'America/Los_Angeles', 'device-456');
-
-for (final hsiJson in hsiPayloads) {
-  print(hsiJson); // each item is a JSON string (one per day)
-}
-```
-
-### Use (stateful baselines - low-level API)
-
-Use this when you need rolling baselines across multiple calls. Don't forget to dispose.
-
-```dart
-import 'package:synheart_wear/flux.dart';
-
-final processor = FluxProcessor(); // default baseline window = 14 days
-
-final day1 = processor.processWhoop(whoopJsonDay1, 'America/New_York', 'device-123');
-final day2 = processor.processWhoop(whoopJsonDay2, 'America/New_York', 'device-123');
-
-final savedBaselinesJson = processor.saveBaselines();
-// ... persist savedBaselinesJson somewhere ...
-
-processor.dispose();
-```
 
 ### Fetching Raw Data for Flux
 
@@ -802,6 +624,15 @@ try {
 </details>
 
 ---
+
+## ⌚ Real-Time Watch Data
+
+Due to HealthKit (iOS) and Health Connect (Android) API limitations, real-time biometric streaming (HR, HRV, accelerometer) requires an active workout/exercise session on the watch. For real-time session-based data, use the Synheart watch companion apps alongside the [Synheart Session SDK](https://github.com/synheart-ai/synheart-session):
+
+- [synheart-wear-watch-ios](https://github.com/synheart-ai/synheart-wear-watch-ios) — watchOS companion (HKWorkoutSession)
+- [synheart-wear-watch-android](https://github.com/synheart-ai/synheart-wear-watch-android) — Wear OS companion (Health Services)
+
+This SDK handles non-realtime and historical data (daily HR, HRV, steps, sleep, etc.) which does not require a workout session.
 
 ## 🤝 Contributing
 

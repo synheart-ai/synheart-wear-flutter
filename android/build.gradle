@@ -80,9 +80,6 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
-        // Bundle vendored Flux JNI libs (Rust) if present.
-        // Expected layout: vendor/flux/android/jniLibs/<abi>/libsynheart_flux.so
-        main.jniLibs.srcDirs += ['../vendor/flux/android/jniLibs']
     }
 
     defaultConfig {

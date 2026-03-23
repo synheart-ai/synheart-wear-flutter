@@ -81,9 +81,6 @@ class MockWearAdapter implements WearAdapter {
   Set<PermissionType> get supportedPermissions => {PermissionType.heartRate};
 
   @override
-  Future<void> ensurePermissions() async {}
-
-  @override
   Future<WearMetrics?> readSnapshot({
     bool isRealTime = false,
     DateTime? startTime,
@@ -111,9 +108,6 @@ class FailingWearAdapter implements WearAdapter {
 
   @override
   Set<PermissionType> get supportedPermissions => {PermissionType.heartRate};
-
-  @override
-  Future<void> ensurePermissions() async {}
 
   @override
   Future<WearMetrics?> readSnapshot({
