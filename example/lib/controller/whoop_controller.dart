@@ -775,136 +775,14 @@ class WhoopController extends ChangeNotifier {
           rawJson.length > 500 ? '${rawJson.substring(0, 500)}...' : rawJson;
       debugPrint('📄 Raw JSON preview: $preview');
 
-      // Step 2: Check Flux availability
-      // Import flux functions directly - they're exported from synheart_wear
-      // For now, we'll catch the error if Flux is not available
-      debugPrint('✅ Checking Flux availability...');
-
-      // Step 3: Process through Flux
-      debugPrint('⚙️ Step 2: Processing through Flux...');
-
-      final wear = SynheartWear(
-        config: const SynheartWearConfig(enableFlux: true),
-      );
-      // No need to call initialize() - readFluxSnapshot will handle it if needed
-      // Since we're providing rawVendorJson, initialization is skipped
-
-      final hsiSnapshot = await wear.readFluxSnapshot(
-        vendor: Vendor.whoop,
-        deviceId: 'whoop_$_userId',
-        timezone: 'America/New_York', // Adjust to your timezone
-        rawVendorJson: rawJson,
-      );
-
-      // Step 4: Print HSI result
-      debugPrint('\n' + '=' * 80);
-      debugPrint('🎯 HSI RESULT (Full JSON):');
-      debugPrint('=' * 80);
-      final hsiJson =
-          const JsonEncoder.withIndent('  ').convert(hsiSnapshot.toJson());
-      debugPrint(hsiJson);
-      debugPrint('=' * 80);
-
-      // Pretty print summary
-      debugPrint('\n📋 HSI Summary:');
-      debugPrint('  Version: ${hsiSnapshot.hsiVersion}');
-      debugPrint('  Observed at: ${hsiSnapshot.observedAtUtc}');
-      debugPrint('  Computed at: ${hsiSnapshot.computedAtUtc}');
-      final producer = hsiSnapshot.producer;
-      debugPrint('  Producer: ${producer.name} v${producer.version}');
-      final windows = hsiSnapshot.windows;
-      final sources = hsiSnapshot.sources;
-      debugPrint('  Windows: ${windows.length}');
-      debugPrint('  Sources: ${sources.length}');
-      final axes = hsiSnapshot.axes;
-      final domains = <String>[];
-      if (axes.affect != null) domains.add('affect');
-      if (axes.engagement != null) domains.add('engagement');
-      if (axes.behavior != null) domains.add('behavior');
-      if (domains.isNotEmpty) {
-        debugPrint('  Axes domains: ${domains.join(", ")}');
-      }
-
-      // Print wearable data from meta if present (wearable format)
-      final meta = hsiSnapshot.meta;
-      if (meta.containsKey('wearable_windows')) {
-        final wearableWindows =
-            meta['wearable_windows'] as Map<String, dynamic>?;
-        if (wearableWindows != null && wearableWindows.isNotEmpty) {
-          debugPrint('\n📊 Wearable Data (from windows):');
-          wearableWindows.forEach((windowId, windowData) {
-            if (windowData is Map<String, dynamic>) {
-              debugPrint('  Window: $windowId');
-              final sleep = windowData['sleep'] as Map<String, dynamic>?;
-              final physiology =
-                  windowData['physiology'] as Map<String, dynamic>?;
-              final activity = windowData['activity'] as Map<String, dynamic>?;
-              final baseline = windowData['baseline'] as Map<String, dynamic>?;
-
-              if (sleep != null) {
-                debugPrint('    Sleep:');
-                if (sleep['duration_minutes'] != null) {
-                  debugPrint(
-                      '      Duration: ${sleep['duration_minutes']} min');
-                }
-                if (sleep['efficiency'] != null) {
-                  debugPrint('      Efficiency: ${sleep['efficiency']}');
-                }
-                if (sleep['score'] != null) {
-                  debugPrint('      Score: ${sleep['score']}');
-                }
-              }
-
-              if (physiology != null) {
-                debugPrint('    Physiology:');
-                if (physiology['hrv_rmssd_ms'] != null) {
-                  debugPrint('      HRV: ${physiology['hrv_rmssd_ms']} ms');
-                }
-                if (physiology['resting_hr_bpm'] != null) {
-                  debugPrint('      RHR: ${physiology['resting_hr_bpm']} bpm');
-                }
-                if (physiology['recovery_score'] != null) {
-                  debugPrint('      Recovery: ${physiology['recovery_score']}');
-                }
-              }
-
-              if (activity != null) {
-                debugPrint('    Activity:');
-                if (activity['strain_score'] != null) {
-                  debugPrint('      Strain: ${activity['strain_score']}');
-                }
-                if (activity['steps'] != null) {
-                  debugPrint('      Steps: ${activity['steps']}');
-                }
-                if (activity['calories'] != null) {
-                  debugPrint('      Calories: ${activity['calories']}');
-                }
-              }
-
-              if (baseline != null) {
-                debugPrint('    Baseline:');
-                if (baseline['days_in_baseline'] != null) {
-                  debugPrint('      Days: ${baseline['days_in_baseline']}');
-                }
-                if (baseline['hrv_deviation_pct'] != null) {
-                  debugPrint(
-                      '      HRV deviation: ${baseline['hrv_deviation_pct']}%');
-                }
-              }
-            }
-          });
-        }
-      }
-
-      debugPrint('=' * 80);
-
-      // Show HSI result in dialog
+      // Flux processing was removed from the SDK package in main.
+      // Keep this button as a raw payload fetch + preview for debugging.
       if (context.mounted) {
-        _showHsiResultDialog(context, hsiSnapshot);
+        _showHsiResultDialog(context, fluxPayload);
       }
 
       _updateState(
-        status: 'Flux processing complete',
+        status: 'Fetched raw WHOOP payload',
         error: '',
       );
     } catch (e, stackTrace) {
@@ -918,10 +796,11 @@ class WhoopController extends ChangeNotifier {
     }
   }
 
-  void _showHsiResultDialog(BuildContext context, HsiPayload hsiSnapshot) {
-    final meta = hsiSnapshot.meta;
-    final wearableWindows = meta['wearable_windows'] as Map<String, dynamic>?;
-
+  void _showHsiResultDialog(BuildContext context, Map<String, dynamic> payload) {
+    final prettyJson = const JsonEncoder.withIndent('  ').convert(payload);
+    final sleepCount = (payload['sleep'] as List?)?.length ?? 0;
+    final recoveryCount = (payload['recovery'] as List?)?.length ?? 0;
+    final cycleCount = (payload['cycle'] as List?)?.length ?? 0;
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -955,32 +834,23 @@ class WhoopController extends ChangeNotifier {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Basic Info
                       _buildSection(
-                        'Basic Info',
+                        'Raw payload',
                         [
-                          _buildInfoRow('Version', hsiSnapshot.hsiVersion),
-                          _buildInfoRow(
-                              'Observed At', hsiSnapshot.observedAtUtc),
-                          _buildInfoRow(
-                              'Computed At', hsiSnapshot.computedAtUtc),
-                          _buildInfoRow(
-                            'Producer',
-                            '${hsiSnapshot.producer.name} v${hsiSnapshot.producer.version}',
-                          ),
-                          _buildInfoRow(
-                              'Windows', '${hsiSnapshot.windows.length}'),
+                          _buildInfoRow('Sleep', '$sleepCount'),
+                          _buildInfoRow('Recovery', '$recoveryCount'),
+                          _buildInfoRow('Cycle', '$cycleCount'),
+                          _buildInfoRow('JSON chars', '${prettyJson.length}'),
                         ],
                       ),
-                      // Wearable Data
-                      if (wearableWindows != null && wearableWindows.isNotEmpty)
-                        ...wearableWindows.entries.map((entry) {
-                          final windowId = entry.key;
-                          final windowData =
-                              entry.value as Map<String, dynamic>;
-                          return _buildWearableWindowSection(
-                              windowId, windowData);
-                        }),
+                      SelectableText(
+                        prettyJson,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          color: Colors.black87,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1034,155 +904,6 @@ class WhoopController extends ChangeNotifier {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildWearableWindowSection(
-    String windowId,
-    Map<String, dynamic> windowData,
-  ) {
-    final sleep = windowData['sleep'] as Map<String, dynamic>?;
-    final physiology = windowData['physiology'] as Map<String, dynamic>?;
-    final activity = windowData['activity'] as Map<String, dynamic>?;
-    final baseline = windowData['baseline'] as Map<String, dynamic>?;
-    final date = windowData['date'] as String? ?? 'Unknown';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSection(
-          'Window: $date',
-          [
-            // Sleep
-            if (sleep != null) ...[
-              const Text(
-                'Sleep',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.purple,
-                ),
-              ),
-              if (sleep['duration_minutes'] != null)
-                _buildInfoRow(
-                  'Duration',
-                  '${(sleep['duration_minutes'] as num).toStringAsFixed(1)} min',
-                ),
-              if (sleep['efficiency'] != null)
-                _buildInfoRow(
-                  'Efficiency',
-                  '${((sleep['efficiency'] as num) * 100).toStringAsFixed(1)}%',
-                ),
-              if (sleep['score'] != null)
-                _buildInfoRow(
-                  'Score',
-                  '${((sleep['score'] as num) * 100).toStringAsFixed(0)}',
-                ),
-              if (sleep['deep_ratio'] != null)
-                _buildInfoRow(
-                  'Deep Sleep',
-                  '${((sleep['deep_ratio'] as num) * 100).toStringAsFixed(1)}%',
-                ),
-              if (sleep['rem_ratio'] != null)
-                _buildInfoRow(
-                  'REM Sleep',
-                  '${((sleep['rem_ratio'] as num) * 100).toStringAsFixed(1)}%',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Physiology
-            if (physiology != null) ...[
-              const Text(
-                'Physiology',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue,
-                ),
-              ),
-              if (physiology['hrv_rmssd_ms'] != null)
-                _buildInfoRow(
-                  'HRV (RMSSD)',
-                  '${(physiology['hrv_rmssd_ms'] as num).toStringAsFixed(1)} ms',
-                ),
-              if (physiology['resting_hr_bpm'] != null)
-                _buildInfoRow(
-                  'Resting HR',
-                  '${(physiology['resting_hr_bpm'] as num).toStringAsFixed(0)} bpm',
-                ),
-              if (physiology['recovery_score'] != null)
-                _buildInfoRow(
-                  'Recovery Score',
-                  '${((physiology['recovery_score'] as num) * 100).toStringAsFixed(0)}',
-                ),
-              if (physiology['respiratory_rate'] != null)
-                _buildInfoRow(
-                  'Respiratory Rate',
-                  '${(physiology['respiratory_rate'] as num).toStringAsFixed(1)} /min',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Activity
-            if (activity != null) ...[
-              const Text(
-                'Activity',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.orange,
-                ),
-              ),
-              if (activity['strain_score'] != null)
-                _buildInfoRow(
-                  'Strain Score',
-                  '${((activity['strain_score'] as num) * 100).toStringAsFixed(0)}',
-                ),
-              if (activity['calories'] != null)
-                _buildInfoRow(
-                  'Calories',
-                  '${(activity['calories'] as num).toStringAsFixed(0)}',
-                ),
-              if (activity['steps'] != null)
-                _buildInfoRow(
-                  'Steps',
-                  '${activity['steps']}',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Baseline
-            if (baseline != null) ...[
-              const Text(
-                'Baseline',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green,
-                ),
-              ),
-              if (baseline['days_in_baseline'] != null)
-                _buildInfoRow(
-                  'Days in Baseline',
-                  '${baseline['days_in_baseline']}',
-                ),
-              if (baseline['hrv_deviation_pct'] != null)
-                _buildInfoRow(
-                  'HRV Deviation',
-                  '${(baseline['hrv_deviation_pct'] as num).toStringAsFixed(1)}%',
-                ),
-              if (baseline['rhr_deviation_pct'] != null)
-                _buildInfoRow(
-                  'RHR Deviation',
-                  '${(baseline['rhr_deviation_pct'] as num).toStringAsFixed(1)}%',
-                ),
-              if (baseline['sleep_deviation_pct'] != null)
-                _buildInfoRow(
-                  'Sleep Deviation',
-                  '${(baseline['sleep_deviation_pct'] as num).toStringAsFixed(1)}%',
-                ),
-            ],
-          ],
-        ),
-      ],
     );
   }
 }

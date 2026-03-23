@@ -183,7 +183,7 @@ class _DeviceCard extends StatelessWidget {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: (isConnected ? color : Colors.grey).withOpacity(0.2),
+                    color: (isConnected ? color : Colors.grey).withAlpha(51),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(icon,

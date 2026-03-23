@@ -36,7 +36,7 @@ class GarminController extends ChangeNotifier {
   String? _currentDataType; // Track what type of data we're displaying
   bool _isSSESubscribed = false;
   List<WearServiceEvent> _sseEvents = []; // Store recent SSE/webhook events
-  Map<String, dynamic> _backfillData = {}; // Store backfill data by type
+  final Map<String, dynamic> _backfillData = {}; // Store backfill data by type
 
   // ──────────────────────────────────────────────────────────────
   // Getters
@@ -1171,98 +1171,15 @@ class GarminController extends ChangeNotifier {
       debugPrint('  Dailies: ${rawData['dailies']?.length ?? 0} records');
       debugPrint('  Sleeps: ${rawData['sleep']?.length ?? 0} records');
 
-      // Check Flux availability
-      if (!FluxProcessor.isFluxAvailable) {
-        throw Exception(
-          'Flux is not available. Please ensure the native library is bundled.',
-        );
-      }
-
-      _updateState(
-        status: 'Processing with Flux...',
-        error: '',
-      );
-
-      // Process with Flux
-      final rawJson = jsonEncode(rawData);
-      final wear = SynheartWear(
-        config: const SynheartWearConfig(enableFlux: true),
-      );
-      final hsiSnapshot = await wear.readFluxSnapshot(
-        rawVendorJson: rawJson,
-        vendor: Vendor.garmin,
-        timezone: 'UTC',
-        deviceId: 'garmin-device-${_userId}',
-      );
-
-      debugPrint('✅ Flux processing complete!');
-      debugPrint('📊 HSI Result Summary:');
-      debugPrint('  Version: ${hsiSnapshot.hsiVersion}');
-      debugPrint('  Windows: ${hsiSnapshot.windows.length}');
-      debugPrint('  Observed At: ${hsiSnapshot.observedAtUtc}');
-      debugPrint('  Computed At: ${hsiSnapshot.computedAtUtc}');
-
-      // Print window details from meta (wearable format)
-      final meta = hsiSnapshot.meta;
-      if (meta.containsKey('wearable_windows')) {
-        final wearableWindows =
-            meta['wearable_windows'] as Map<String, dynamic>?;
-        if (wearableWindows != null && wearableWindows.isNotEmpty) {
-          debugPrint('\n📅 Windows:');
-          wearableWindows.forEach((windowId, windowData) {
-            if (windowData is Map<String, dynamic>) {
-              debugPrint('  Window: $windowId');
-              final sleep = windowData['sleep'] as Map<String, dynamic>?;
-              final physiology =
-                  windowData['physiology'] as Map<String, dynamic>?;
-              final activity = windowData['activity'] as Map<String, dynamic>?;
-
-              if (sleep != null) {
-                debugPrint('    Sleep:');
-                if (sleep['duration_minutes'] != null) {
-                  debugPrint(
-                      '      Duration: ${(sleep['duration_minutes'] as num).toStringAsFixed(1)} min');
-                }
-                if (sleep['score'] != null) {
-                  debugPrint(
-                      '      Score: ${((sleep['score'] as num) * 100).toStringAsFixed(0)}');
-                }
-              }
-              if (physiology != null) {
-                debugPrint('    Physiology:');
-                if (physiology['resting_hr_bpm'] != null) {
-                  debugPrint(
-                      '      Resting HR: ${(physiology['resting_hr_bpm'] as num).toStringAsFixed(0)} bpm');
-                }
-                if (physiology['hrv_rmssd_ms'] != null) {
-                  debugPrint(
-                      '      HRV: ${(physiology['hrv_rmssd_ms'] as num).toStringAsFixed(1)} ms');
-                }
-              }
-              if (activity != null) {
-                debugPrint('    Activity:');
-                if (activity['steps'] != null) {
-                  debugPrint('      Steps: ${activity['steps']}');
-                }
-                if (activity['calories'] != null) {
-                  debugPrint(
-                      '      Calories: ${(activity['calories'] as num).toStringAsFixed(0)}');
-                }
-              }
-            }
-          });
-        }
-      }
-
-      debugPrint('=' * 80);
-
-      // Show HSI result in dialog
+      // Flux processing was removed from the SDK package in main.
+      // Keep this button as a raw payload fetch + preview for debugging.
+      debugPrint('✅ Raw Garmin payload fetched (Flux not available).');
       if (context.mounted) {
-        _showHsiResultDialog(context, hsiSnapshot);
+        _showHsiResultDialog(context, rawData);
       }
 
       _updateState(
-        status: 'Flux processing complete',
+        status: 'Fetched raw Garmin payload',
         error: '',
       );
     } catch (e, stackTrace) {
@@ -1285,10 +1202,10 @@ class GarminController extends ChangeNotifier {
     }
   }
 
-  void _showHsiResultDialog(BuildContext context, HsiPayload hsiSnapshot) {
-    final meta = hsiSnapshot.meta;
-    final wearableWindows = meta['wearable_windows'] as Map<String, dynamic>?;
-
+  void _showHsiResultDialog(BuildContext context, Map<String, dynamic> payload) {
+    final prettyJson = const JsonEncoder.withIndent('  ').convert(payload);
+    final dailiesCount = (payload['dailies'] as List?)?.length ?? 0;
+    final sleepCount = (payload['sleep'] as List?)?.length ?? 0;
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1322,32 +1239,22 @@ class GarminController extends ChangeNotifier {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Basic Info
                       _buildSection(
-                        'Basic Info',
+                        'Raw payload',
                         [
-                          _buildInfoRow('Version', hsiSnapshot.hsiVersion),
-                          _buildInfoRow(
-                              'Observed At', hsiSnapshot.observedAtUtc),
-                          _buildInfoRow(
-                              'Computed At', hsiSnapshot.computedAtUtc),
-                          _buildInfoRow(
-                            'Producer',
-                            '${hsiSnapshot.producer.name} v${hsiSnapshot.producer.version}',
-                          ),
-                          _buildInfoRow(
-                              'Windows', '${hsiSnapshot.windows.length}'),
+                          _buildInfoRow('Dailies', '$dailiesCount'),
+                          _buildInfoRow('Sleep', '$sleepCount'),
+                          _buildInfoRow('JSON chars', '${prettyJson.length}'),
                         ],
                       ),
-                      // Wearable Data
-                      if (wearableWindows != null && wearableWindows.isNotEmpty)
-                        ...wearableWindows.entries.map((entry) {
-                          final windowId = entry.key;
-                          final windowData =
-                              entry.value as Map<String, dynamic>;
-                          return _buildWearableWindowSection(
-                              windowId, windowData);
-                        }),
+                      SelectableText(
+                        prettyJson,
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                          color: Colors.black87,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1401,127 +1308,6 @@ class GarminController extends ChangeNotifier {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildWearableWindowSection(
-    String windowId,
-    Map<String, dynamic> windowData,
-  ) {
-    final sleep = windowData['sleep'] as Map<String, dynamic>?;
-    final physiology = windowData['physiology'] as Map<String, dynamic>?;
-    final activity = windowData['activity'] as Map<String, dynamic>?;
-    final baseline = windowData['baseline'] as Map<String, dynamic>?;
-    final date = windowData['date'] as String? ?? 'Unknown';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSection(
-          'Window: $date',
-          [
-            // Sleep
-            if (sleep != null) ...[
-              const Text(
-                'Sleep',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.purple,
-                ),
-              ),
-              if (sleep['duration_minutes'] != null)
-                _buildInfoRow(
-                  'Duration',
-                  '${(sleep['duration_minutes'] as num).toStringAsFixed(1)} min',
-                ),
-              if (sleep['efficiency'] != null)
-                _buildInfoRow(
-                  'Efficiency',
-                  '${((sleep['efficiency'] as num) * 100).toStringAsFixed(1)}%',
-                ),
-              if (sleep['score'] != null)
-                _buildInfoRow(
-                  'Score',
-                  '${((sleep['score'] as num) * 100).toStringAsFixed(0)}',
-                ),
-              if (sleep['deep_ratio'] != null)
-                _buildInfoRow(
-                  'Deep Sleep',
-                  '${((sleep['deep_ratio'] as num) * 100).toStringAsFixed(1)}%',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Physiology
-            if (physiology != null) ...[
-              const Text(
-                'Physiology',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green,
-                ),
-              ),
-              if (physiology['resting_hr_bpm'] != null)
-                _buildInfoRow(
-                  'Resting HR',
-                  '${(physiology['resting_hr_bpm'] as num).toStringAsFixed(0)} bpm',
-                ),
-              if (physiology['hrv_rmssd_ms'] != null)
-                _buildInfoRow(
-                  'HRV',
-                  '${(physiology['hrv_rmssd_ms'] as num).toStringAsFixed(1)} ms',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Activity
-            if (activity != null) ...[
-              const Text(
-                'Activity',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.orange,
-                ),
-              ),
-              if (activity['steps'] != null)
-                _buildInfoRow('Steps', '${activity['steps']}'),
-              if (activity['calories'] != null)
-                _buildInfoRow(
-                  'Calories',
-                  '${(activity['calories'] as num).toStringAsFixed(0)}',
-                ),
-              if (activity['distance_meters'] != null)
-                _buildInfoRow(
-                  'Distance',
-                  '${((activity['distance_meters'] as num) / 1000).toStringAsFixed(2)} km',
-                ),
-              const SizedBox(height: 8),
-            ],
-            // Baseline
-            if (baseline != null) ...[
-              const Text(
-                'Baseline',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.teal,
-                ),
-              ),
-              if (baseline['days_in_baseline'] != null)
-                _buildInfoRow(
-                  'Days',
-                  '${baseline['days_in_baseline']}',
-                ),
-              if (baseline['hrv_deviation_pct'] != null)
-                _buildInfoRow(
-                  'HRV Deviation',
-                  '${(baseline['hrv_deviation_pct'] as num).toStringAsFixed(1)}%',
-                ),
-            ],
-          ],
-        ),
-      ],
     );
   }
 
