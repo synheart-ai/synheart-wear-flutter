@@ -127,5 +127,15 @@ export 'src/adapters/android_health_helper.dart';
 export 'src/ramen/ramen_client.dart';
 export 'src/wear/wear_service_client.dart';
 
-// Flux - HSI-compliant human state signal processing
-export 'src/flux/flux.dart';
+// Garmin SDK adapter (public facade only)
+export 'src/adapters/garmin/garmin.dart';
+
+// Generic wearable device types
+export 'src/models/wearable_device.dart';
+
+// HealthKit / Health Connect
+export 'src/adapters/health_adapter.dart';
+
+// BLE Heart Rate Monitor
+export 'src/adapters/ble_hrm_models.dart';
+export 'src/adapters/ble_hrm_bridge.dart';

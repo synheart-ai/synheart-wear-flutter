@@ -1,17 +1,17 @@
 name: synheart_wear
 description: Unified wearable SDK for Synheart (HR, HRV, steps, energy, stress).
-version: 0.2.3
+version: 0.3.1
 homepage: https://github.com/synheart-ai/synheart_wear
 repository: https://github.com/synheart-ai/synheart_wear
 license: Apache-2.0
 environment:
   sdk: ">=3.8.0 <4.0.0"
-  flutter: ">=3.22.0"
+  flutter: ">=3.32.0"
 dependencies:
   flutter:
     sdk: flutter
   collection: ^1.18.0
-  ffi: ^2.1.0
+  meta: ^1.16.0
   uuid: ^4.4.0
   path_provider: ^2.1.4
   health: ^13.2.1
@@ -22,9 +22,6 @@ dependencies:
   shared_preferences: ^2.2.2
   grpc: ^3.2.0
   protobuf: ^2.1.0
-  # Platform bridges (add as needed)
-  # health: ^9.0.0
-  # google_fit: any
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -6,17 +6,25 @@ import android.net.Uri
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import com.synheart.wear.garmin.GarminSDKBridge
 
 class SynheartWearPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
     private var applicationContext: android.content.Context? = null
     private val SAMSUNG_HEALTH_PACKAGE = "com.samsung.shealth"
+    private var garminBridge: GarminSDKBridge? = null
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         applicationContext = flutterPluginBinding.applicationContext
         channel =
                 MethodChannel(flutterPluginBinding.binaryMessenger, "synheart_wear/android_health")
         channel.setMethodCallHandler(this)
+
+        // Register Garmin SDK bridge
+        GarminSDKBridge.registerWith(flutterPluginBinding)
+
+        // Register BLE HRM handler
+        BleHrmHandler.registerWith(flutterPluginBinding)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {

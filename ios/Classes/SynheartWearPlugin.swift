@@ -6,9 +6,16 @@ public class SynheartWearPlugin: NSObject, FlutterPlugin {
   private let healthStore = HKHealthStore()
 
   public static func register(with registrar: FlutterPluginRegistrar) {
+    // Register HealthKit RR channel
     let channel = FlutterMethodChannel(name: "synheart_wear/healthkit_rr", binaryMessenger: registrar.messenger())
     let instance = SynheartWearPlugin()
     registrar.addMethodCallDelegate(instance, channel: channel)
+
+    // Register Garmin SDK bridge
+    GarminSDKBridge.register(with: registrar)
+
+    // Register BLE HRM handler
+    BleHrmHandler.register(with: registrar)
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -50,38 +57,35 @@ public class SynheartWearPlugin: NSObject, FlutterPlugin {
 
     let rrCollector = HeartbeatRRCollector()
 
-    // Request authorization if needed
-    healthStore.requestAuthorization(toShare: nil, read: [heartbeatType]) { [weak self] (granted, error) in
-      guard let self = self, granted, error == nil else {
+    // No requestAuthorization here — HealthKit authorization is handled
+    // by the host app's permission flow before data is read. Requesting
+    // auth for HKHeartbeatSeriesTypeIdentifier separately would trigger a
+    // second HealthKit dialog. If the type isn't authorized, the query
+    // returns empty results (RR intervals are optional enrichment).
+    let sort = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)]
+    let sampleQuery = HKSampleQuery(sampleType: heartbeatType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: sort) { [weak self] (_, samples, err) in
+      guard let self = self, err == nil, let hbSamples = samples as? [HKHeartbeatSeriesSample], !hbSamples.isEmpty else {
         completion([Double]())
         return
       }
-
-      let sort = [NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)]
-      let sampleQuery = HKSampleQuery(sampleType: heartbeatType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: sort) { [weak self] (_, samples, err) in
-        guard let self = self, err == nil, let hbSamples = samples as? [HKHeartbeatSeriesSample], !hbSamples.isEmpty else {
-          completion([Double]())
-          return
-        }
-        let group = DispatchGroup()
-        for sample in hbSamples {
-          group.enter()
-          let seriesQuery = HKHeartbeatSeriesQuery(heartbeatSeries: sample) { (_, timeSinceSeriesStart, _, done, error) in
-            if error == nil {
-              rrCollector.add(timeSinceSeriesStart: timeSinceSeriesStart, precededByGap: false)
-            }
-            if done {
-              group.leave()
-            }
+      let group = DispatchGroup()
+      for sample in hbSamples {
+        group.enter()
+        let seriesQuery = HKHeartbeatSeriesQuery(heartbeatSeries: sample) { (_, timeSinceSeriesStart, _, done, error) in
+          if error == nil {
+            rrCollector.add(timeSinceSeriesStart: timeSinceSeriesStart, precededByGap: false)
           }
-          self.healthStore.execute(seriesQuery)
+          if done {
+            group.leave()
+          }
         }
-        group.notify(queue: .main) {
-          completion(rrCollector.toRRMs())
-        }
+        self.healthStore.execute(seriesQuery)
       }
-      self.healthStore.execute(sampleQuery)
+      group.notify(queue: .main) {
+        completion(rrCollector.toRRMs())
+      }
     }
+    healthStore.execute(sampleQuery)
   }
 }
 

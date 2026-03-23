@@ -7,7 +7,8 @@ on:
 
 jobs:
   publish:
+    name: Publish Package
     permissions:
-      id-token: write # Required for authentication using OIDC
+      id-token: write
       contents: read
     uses: dart-lang/setup-dart/.github/workflows/publish.yml@v1

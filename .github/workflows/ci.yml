@@ -4,22 +4,35 @@ on:
   pull_request:
   push:
     branches:
-      - "**"
+      - main
 
 jobs:
   test:
+    name: Analyze & Test (Flutter ${{ matrix.flutter }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter:
+          # Lowest Flutter that bundles Dart >= 3.8 (matches pubspec)
+          - "3.32.0"
+          # Track latest stable to catch upcoming breakages early
+          - "stable"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
+      - uses: actions/checkout@v4
+      - name: Setup Flutter (pinned)
+        if: matrix.flutter != 'stable'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.flutter }}
+          channel: stable
+      - name: Setup Flutter (stable channel)
+        if: matrix.flutter == 'stable'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Run tests
-        run: flutter test
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - name: Publish dry-run (pub.dev readiness)
+        run: dart pub publish --dry-run

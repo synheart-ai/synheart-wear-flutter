@@ -19,7 +19,7 @@ migrate_working_dir/
 # The .vscode folder contains launch configuration and tasks you configure in
 # VS Code which you may wish to be included in version control, so this line
 # is commented out by default.
-#.vscode/
+.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -86,6 +86,20 @@ migrate_working_dir/
 coverage/
 *.lcov
 
+# Garmin SDK (licensed - must be downloaded separately)
+# Keep README.md files for setup instructions
+ios/Frameworks/*.xcframework
+ios/Frameworks/*.framework
+android/libs/*.aar
+android/libs/*.jar
+!android/libs/README.md
+!ios/Frameworks/README.md
+vendor/garmin/
+vendor/flux/
+
+# Garmin RTS companion (cloned at build time)
+.garmin/
+
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3
@@ -99,10 +113,12 @@ coverage/
 .env.*
 !.env.example
 
+# FVM Version Cache
 .fvm/
-
-.vscode/
-
-# Local vendor SDKs (do not publish)
-vendor/garmin/
 .fvmrc
+
+# VS Code (user-specific)
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/extensions.json
