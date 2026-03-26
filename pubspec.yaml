@@ -34,5 +34,5 @@ flutter:
       ios:
         pluginClass: SynheartWearPlugin
       android:
-        package: com.synheart.wear
+        package: ai.synheart.wear
         pluginClass: SynheartWearPlugin

@@ -1,4 +1,4 @@
-package com.synheart.wear
+package ai.synheart.wear
 
 import android.bluetooth.*
 import android.bluetooth.le.ScanCallback
