@@ -1,4 +1,4 @@
-package com.synheart.wear.garmin
+package ai.synheart.wear.garmin
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall

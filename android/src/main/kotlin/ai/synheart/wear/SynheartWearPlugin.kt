@@ -1,4 +1,4 @@
-package com.synheart.wear
+package ai.synheart.wear
 
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -6,7 +6,7 @@ import android.net.Uri
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import com.synheart.wear.garmin.GarminSDKBridge
+import ai.synheart.wear.garmin.GarminSDKBridge
 
 class SynheartWearPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
