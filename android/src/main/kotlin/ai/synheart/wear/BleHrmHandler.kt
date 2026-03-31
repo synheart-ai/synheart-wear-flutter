@@ -44,6 +44,11 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
     private var eventSink: EventChannel.EventSink? = null
     private var connectedGatt: BluetoothGatt? = null
     private var sessionId: String? = null
+    private var lastDeviceId: String? = null
+    private var reconnectRunnable: Runnable? = null
+    private var reconnectAttempts = 0
+    private val maxReconnectAttempts = 5
+    private val reconnectDelayMs = 3000L
 
     private val bluetoothAdapter: BluetoothAdapter?
         get() = (context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager)?.adapter
@@ -172,22 +177,24 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     connectedGatt = gatt
+                    reconnectAttempts = 0
                     mainHandler.post { result.success(null) }
                     try {
                         gatt.discoverServices()
                     } catch (_: SecurityException) {}
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    if (connectedGatt != null) {
-                        connectedGatt = null
-                        mainHandler.post {
-                            eventSink?.error("DISCONNECTED", "Device disconnected", null)
-                        }
-                    } else {
+                    val wasConnected = connectedGatt != null
+                    connectedGatt = null
+                    try { gatt.close() } catch (_: Exception) {}
+
+                    if (wasConnected && lastDeviceId != null && eventSink != null) {
+                        // Auto-reconnect if we were streaming and got disconnected
+                        scheduleReconnect()
+                    } else if (!wasConnected) {
                         mainHandler.post {
                             result.error("SUBSCRIBE_FAILED", "Connection failed (status=$status)", null)
                         }
                     }
-                    try { gatt.close() } catch (_: Exception) {}
                 }
             }
 
@@ -200,8 +207,14 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                     gatt.setCharacteristicNotification(characteristic, true)
                     val descriptor = characteristic.getDescriptor(CCCD_UUID)
                     if (descriptor != null) {
-                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                        gatt.writeDescriptor(descriptor)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            @Suppress("DEPRECATION")
+                            gatt.writeDescriptor(descriptor)
+                        }
                     }
                 } catch (e: SecurityException) {
                     mainHandler.post {
@@ -210,14 +223,25 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                 }
             }
 
+            // API 33+ callback (non-deprecated)
+            override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+                if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+                val sample = parseHeartRateMeasurement(value, gatt.device)
+                mainHandler.post { eventSink?.success(sample) }
+            }
+
+            // Pre-API 33 fallback (deprecated but needed for older devices)
+            @Deprecated("Deprecated in API 33", ReplaceWith("onCharacteristicChanged(gatt, characteristic, value)"))
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+                @Suppress("DEPRECATION")
                 val data = characteristic.value ?: return
                 val sample = parseHeartRateMeasurement(data, gatt.device)
                 mainHandler.post { eventSink?.success(sample) }
             }
         }
 
+        lastDeviceId = deviceId
         try {
             device.connectGatt(context, false, gattCallback)
         } catch (e: SecurityException) {
@@ -225,9 +249,86 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         }
     }
 
+    // MARK: - Reconnect
+
+    private fun scheduleReconnect() {
+        if (reconnectAttempts >= maxReconnectAttempts) {
+            mainHandler.post {
+                eventSink?.error("DISCONNECTED", "Device disconnected after $maxReconnectAttempts reconnect attempts", null)
+            }
+            return
+        }
+
+        reconnectAttempts++
+        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        reconnectRunnable = Runnable {
+            val devId = lastDeviceId ?: return@Runnable
+            val adapter = bluetoothAdapter ?: return@Runnable
+            if (!adapter.isEnabled) return@Runnable
+
+            try {
+                val device = adapter.getRemoteDevice(devId)
+                device.connectGatt(context, false, object : BluetoothGattCallback() {
+                    override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+                        if (newState == BluetoothProfile.STATE_CONNECTED) {
+                            connectedGatt = gatt
+                            reconnectAttempts = 0
+                            try { gatt.discoverServices() } catch (_: SecurityException) {}
+                        } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                            try { gatt.close() } catch (_: Exception) {}
+                            scheduleReconnect()
+                        }
+                    }
+
+                    override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                        if (status != BluetoothGatt.GATT_SUCCESS) return
+                        val service = gatt.getService(HR_SERVICE_UUID) ?: return
+                        val characteristic = service.getCharacteristic(HR_MEASUREMENT_UUID) ?: return
+                        try {
+                            gatt.setCharacteristicNotification(characteristic, true)
+                            val descriptor = characteristic.getDescriptor(CCCD_UUID)
+                            if (descriptor != null) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                                    @Suppress("DEPRECATION")
+                                    gatt.writeDescriptor(descriptor)
+                                }
+                            }
+                        } catch (_: SecurityException) {}
+                    }
+
+                    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+                        if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+                        val sample = parseHeartRateMeasurement(value, gatt.device)
+                        mainHandler.post { eventSink?.success(sample) }
+                    }
+
+                    @Deprecated("Deprecated in API 33")
+                    override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+                        if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+                        @Suppress("DEPRECATION")
+                        val data = characteristic.value ?: return
+                        val sample = parseHeartRateMeasurement(data, gatt.device)
+                        mainHandler.post { eventSink?.success(sample) }
+                    }
+                })
+            } catch (_: SecurityException) {
+                scheduleReconnect()
+            } catch (_: IllegalArgumentException) {}
+        }
+        mainHandler.postDelayed(reconnectRunnable!!, reconnectDelayMs)
+    }
+
     // MARK: - Disconnect
 
     private fun disconnect(result: MethodChannel.Result) {
+        reconnectRunnable?.let { mainHandler.removeCallbacks(it) }
+        reconnectRunnable = null
+        reconnectAttempts = 0
+        lastDeviceId = null
         try {
             connectedGatt?.disconnect()
             connectedGatt?.close()
