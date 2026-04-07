@@ -58,6 +58,20 @@ class BleHrmProvider {
     }
   }
 
+  /// Get already-bonded BLE heart rate devices (no scanning needed).
+  Future<List<BleHrmDevice>> getBondedHrDevices() async {
+    try {
+      final result = await _method.invokeMethod<List<dynamic>>('getBondedHrDevices');
+      if (result == null) return [];
+      return result
+          .cast<Map<dynamic, dynamic>>()
+          .map(BleHrmDevice.fromMap)
+          .toList();
+    } on PlatformException catch (e) {
+      throw _mapError(e);
+    }
+  }
+
   /// Connect to a BLE heart rate monitor and start receiving samples.
   ///
   /// [deviceId] — the device to connect to (from [scan] results).

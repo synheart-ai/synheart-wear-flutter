@@ -73,6 +73,7 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             }
             "disconnect" -> disconnect(result)
             "isConnected" -> result.success(connectedGatt != null)
+            "getBondedHrDevices" -> getBondedHrDevices(result)
             else -> result.notImplemented()
         }
     }
@@ -85,6 +86,39 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
 
     override fun onCancel(arguments: Any?) {
         eventSink = null
+    }
+
+    // MARK: - Bonded Devices
+
+    private fun getBondedHrDevices(result: MethodChannel.Result) {
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            result.error("BLUETOOTH_OFF", "Bluetooth is not available or off", null)
+            return
+        }
+        try {
+            val bonded = adapter.bondedDevices ?: emptySet()
+            val hrDevices = bonded
+                .filter { device ->
+                    val uuids = device.uuids?.map { it.uuid } ?: emptyList()
+                    uuids.contains(HR_SERVICE_UUID) ||
+                    device.name?.contains("Polar", ignoreCase = true) == true ||
+                    device.name?.contains("Garmin", ignoreCase = true) == true ||
+                    device.name?.contains("Wahoo", ignoreCase = true) == true ||
+                    device.name?.contains("HRM", ignoreCase = true) == true ||
+                    device.name?.contains("WHOOP", ignoreCase = true) == true
+                }
+                .map { device ->
+                    mapOf(
+                        "deviceId" to device.address,
+                        "name" to (device.name ?: "Unknown"),
+                        "rssi" to 0
+                    )
+                }
+            result.success(hrDevices)
+        } catch (e: SecurityException) {
+            result.error("PERMISSION_DENIED", "Bluetooth permission denied: ${e.message}", null)
+        }
     }
 
     // MARK: - Scan
