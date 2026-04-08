@@ -124,12 +124,33 @@ public class BleHrmHandler: NSObject {
     private func finishScan(namePrefix: String?) {
         centralManager?.stopScan()
 
-        var peripherals = discoveredPeripherals
-        if let prefix = namePrefix {
-            peripherals = peripherals.filter { ($0.name ?? "").hasPrefix(prefix) }
+        // Merge: advertising devices + already-connected peripherals with HR service
+        var seenIds = Set<UUID>()
+
+        // 1. Devices found during active scan
+        for p in discoveredPeripherals {
+            seenIds.insert(p.identifier)
         }
 
-        let devices: [[String: Any]] = peripherals.map { p in
+        // 2. Peripherals already connected to the system (e.g. Polar H10 paired via another app)
+        //    Store them in discoveredPeripherals so connect() can find them later.
+        if let connected = centralManager?.retrieveConnectedPeripherals(withServices: [heartRateServiceUUID]) {
+            for p in connected {
+                if seenIds.insert(p.identifier).inserted {
+                    discoveredPeripherals.append(p)
+                    if peripheralRSSI[p.identifier] == nil {
+                        peripheralRSSI[p.identifier] = -50
+                    }
+                }
+            }
+        }
+
+        var allPeripherals = discoveredPeripherals
+        if let prefix = namePrefix {
+            allPeripherals = allPeripherals.filter { ($0.name ?? "").hasPrefix(prefix) }
+        }
+
+        let devices: [[String: Any]] = allPeripherals.map { p in
             return [
                 "deviceId": p.identifier.uuidString,
                 "name": p.name ?? "",
@@ -151,17 +172,37 @@ public class BleHrmHandler: NSObject {
             return
         }
 
-        // Look in discovered peripherals first, then try system retrieval
-        let peripheral = discoveredPeripherals.first(where: { $0.identifier == uuid })
+        // Look in discovered peripherals, then known peripherals, then system-connected
+        var target = discoveredPeripherals.first(where: { $0.identifier == uuid })
             ?? centralManager?.retrievePeripherals(withIdentifiers: [uuid]).first
 
-        guard let target = peripheral else {
+        if target == nil {
+            // Try retrieving from system-connected peripherals with HR service
+            target = centralManager?.retrieveConnectedPeripherals(withServices: [heartRateServiceUUID])
+                .first(where: { $0.identifier == uuid })
+        }
+
+        guard let peripheral = target else {
             result(FlutterError(code: "DEVICE_NOT_FOUND", message: "Device not found", details: nil))
             return
         }
 
+        // Keep a strong reference
+        if !discoveredPeripherals.contains(where: { $0.identifier == uuid }) {
+            discoveredPeripherals.append(peripheral)
+        }
+
+        // If already connected, skip connect and go straight to service discovery
+        if peripheral.state == .connected {
+            connectedPeripheral = peripheral
+            peripheral.delegate = self
+            peripheral.discoverServices([heartRateServiceUUID])
+            result(nil)
+            return
+        }
+
         connectResult = result
-        centralManager?.connect(target, options: nil)
+        centralManager?.connect(peripheral, options: nil)
     }
 
     // MARK: - Disconnect

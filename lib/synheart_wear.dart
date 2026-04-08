@@ -118,13 +118,9 @@ export 'src/core/local_cache.dart';
 export 'src/core/logger.dart';
 export 'src/normalization/normalizer.dart';
 export 'src/swip/swip_hooks.dart';
-export 'src/sources/whoop_cloud.dart';
-export 'src/sources/garmin_cloud.dart';
-export 'src/sources/event_subscription.dart';
 export 'src/adapters/android_health_helper.dart';
 
-// RAMEN (gRPC) and Wear Service (REST) per backend integration guide
-export 'src/ramen/ramen_client.dart';
+// Wear Service (REST) for historical data backfill
 export 'src/wear/wear_service_client.dart';
 
 // Garmin SDK adapter (public facade only)
