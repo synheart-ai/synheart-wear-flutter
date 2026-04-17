@@ -46,9 +46,9 @@ allprojects {
         // Without the SDK, Garmin methods will return "SDK not available" errors.
         // ========================================================================
 
-        // Local AAR repository (for Garmin SDK)
-        flatDir {
-            dirs 'libs'
+        // Local Maven repository for Garmin SDK AAR
+        maven {
+            url "${project.projectDir}/repo"
         }
 
         // Uncomment for Maven/GitHub Packages authentication
@@ -96,8 +96,8 @@ dependencies {
     //
     // Uncomment ONE of the following after adding the SDK:
     //
-    // Option 1: Local AAR (place garmin-health-sdk.aar in android/libs/)
-    // implementation(name: 'garmin-health-sdk', ext: 'aar')
+    // Garmin Health Companion SDK (local Maven repo)
+    implementation 'com.garmin.health:companion-sdk:4.7.0'
     //
     // Option 2: Maven - Companion variant (for consumer apps)
     // implementation 'com.garmin.health:companion-sdk:4.4.0'
@@ -108,8 +108,8 @@ dependencies {
     // ========================================================================
 
     // Guava ListenableFuture (required when Garmin SDK is enabled)
-    // Uncomment when enabling Garmin SDK:
-    // implementation 'com.google.guava:guava:32.1.3-android'
+    // Required by Garmin SDK (ListenableFuture)
+    implementation 'com.google.guava:guava:32.1.3-android'
 
     // Coroutines for async operations
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'

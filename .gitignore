@@ -92,6 +92,7 @@ ios/Frameworks/*.xcframework
 ios/Frameworks/*.framework
 android/libs/*.aar
 android/libs/*.jar
+android/repo/**/*.aar
 !android/libs/README.md
 !ios/Frameworks/README.md
 vendor/garmin/
