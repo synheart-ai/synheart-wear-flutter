@@ -6,17 +6,20 @@ This guide explains how to integrate the Garmin Health SDK with `synheart_wear` 
 
 ## Architecture overview
 
-The Dart-side `GarminHealth` facade lives in this open-source repo, but its **real implementation** ships from a private companion repository (`synheart-wear-garmin-companion`) because it links against the licensed Garmin SDK. The `Makefile` automates the overlay:
+Only the **native Kotlin wrapper** that calls `com.garmin.health.*` actually requires the Garmin licence. Everything else — the Dart facade, the platform-channel scaffolding, all data models, the iOS Swift bridge — is open-source and ships in this repo by default. The companion overlay only swaps in two Kotlin files at build time:
 
-| Layer                     | Open-source stub                              | Licensed implementation                                  |
-| ------------------------- | --------------------------------------------- | -------------------------------------------------------- |
-| Dart facade               | `lib/src/adapters/garmin/garmin_health.dart`  | `.garmin/dart/lib/src/adapters/garmin/garmin_health.dart`|
-| Dart adapter / channels   | _(absent in stub mode)_                       | `.garmin/dart/lib/src/adapters/garmin/*.dart`            |
-| Garmin data models        | _(absent in stub mode)_                       | `.garmin/dart/lib/src/models/garmin_*.dart`              |
-| Android native bridge     | `android/.../GarminSDKBridge.kt` (stub)       | `.garmin/dart/android/.../GarminSDKBridge.kt` + wrappers |
-| iOS native bridge         | `ios/Classes/Garmin/GarminSDKBridge.swift`    | _(in-tree; conditionally compiled with `Companion`)_     |
+| Layer                              | Where it lives                                                              | Licensed? |
+| ---------------------------------- | --------------------------------------------------------------------------- | --------- |
+| `GarminHealth` Dart facade         | `lib/src/adapters/garmin/garmin_health.dart`                                | No (OSS)  |
+| Platform channel + device manager  | `lib/src/adapters/garmin/garmin_platform_channel.dart`, `garmin_device_manager.dart`, `garmin_sdk_adapter.dart`, `garmin_errors.dart` | No (OSS)  |
+| Garmin data models                 | `lib/src/models/garmin_*.dart`                                              | No (OSS)  |
+| iOS native bridge                  | `ios/Classes/Garmin/GarminSDKBridge.swift`                                  | No (OSS, weak-linked against `Companion.xcframework`) |
+| Android native bridge stub         | `android/.../GarminSDKBridge.kt`                                            | No (OSS — returns `UNAVAILABLE` until overlay runs)   |
+| **Android licensed wrapper**       | `android/.../GarminHealthSdkWrapper.kt`, `android/.../GarminSdkWrapper.kt` (gitignored) | **Yes — companion repo** |
 
-`make link-garmin` swaps stubs for symlinks into `.garmin/`. `.garmin/` is gitignored in this repo, so the symlinked files never end up in the open-source tree.
+`make link-garmin` (a) backs `GarminSDKBridge.kt` up to `GarminSDKBridge.kt.stub`, (b) symlinks the licensed version from `.garmin/` over it, and (c) symlinks the two `Garmin*Wrapper.kt` files into the gitignored slot beside it. `.garmin/` is gitignored, so the symlinked files never end up in the open-source tree.
+
+In stub mode (no overlay): every Garmin Dart call still compiles cleanly and uses the same data classes, but the platform channel returns `UNAVAILABLE` `PlatformException`s which the Dart layer surfaces as `GarminSDKError`. Non-Garmin adapters are unaffected.
 
 ---
 
@@ -187,27 +190,27 @@ What `make build-with-garmin` does:
 
 1. `install-hooks` — points `git config core.hooksPath` at `.githooks/` so the pre-commit guard is active.
 2. `fetch-garmin` — shallow-clones the companion repo into `.garmin/` (or `git pull --ff-only` if already present).
-3. `link-garmin` — backs up the two tracked stubs (`garmin_health.dart`, `GarminSDKBridge.kt`) to `.stub` files, then symlinks the licensed Dart, model, and Android-bridge files from `.garmin/dart/...` over the open-source tree.
+3. `link-garmin` — backs up the tracked `GarminSDKBridge.kt` stub to `.stub`, symlinks the licensed Kotlin bridge over it, and symlinks the two companion-only Kotlin wrappers (`GarminSdkWrapper.kt`, `GarminHealthSdkWrapper.kt`) into the gitignored slot beside it.
 
-`.garmin/` and the 12 overlay-only paths are gitignored. The two protected stubs **must** stay tracked, so they're guarded a different way (see below).
+`.garmin/` and `Garmin*Wrapper.kt` are gitignored. `GarminSDKBridge.kt` **must** stay tracked, so it's guarded a different way (see below). All Dart code is plain OSS — the overlay no longer touches `lib/`.
 
 ### Overlay safety net
 
 Three layered defences keep the overlay from leaking into the open-source repo:
 
-1. **`.gitignore`** — the 12 overlay-only files (`garmin_*.dart` adapters/models, `GarminSdkWrapper.kt`, `GarminHealthSdkWrapper.kt`) are ignored, with explicit `!` exceptions for the two tracked stubs.
-2. **Pre-commit hook (`.githooks/pre-commit`)** — refuses any commit that stages either tracked stub as a symlink. Activated by `make install-hooks` (run once per clone — `make build*` does it for you).
-3. **CI check (`make verify-clean`)** — runs in the `garmin-overlay-guard` job on every PR/push and fails if the working tree has overlay symlinks at the protected paths.
+1. **`.gitignore`** — `Garmin*Wrapper.kt` is ignored so the two licensed Kotlin wrappers can never be staged.
+2. **Pre-commit hook (`.githooks/pre-commit`)** — refuses any commit that stages `GarminSDKBridge.kt` as a symlink. Activated by `make install-hooks` (run once per clone — `make build*` does it for you).
+3. **CI check (`make verify-clean`)** — runs in the `garmin-overlay-guard` job on every PR/push and fails if the working tree has the overlay symlink at the protected path.
 
 If you ever see the hook fire:
 
 ```text
 ✗ Refusing to commit: Garmin overlay symlinks detected in the index.
-    lib/src/adapters/garmin/garmin_health.dart
-      → /Volumes/.../.garmin/dart/lib/src/adapters/garmin/garmin_health.dart
+    android/src/main/kotlin/ai/synheart/wear/garmin/GarminSDKBridge.kt
+      → /Volumes/.../.garmin/dart/android/.../GarminSDKBridge.kt
 ```
 
-…run `make clean-garmin` (which restores the stubs from `.stub` backups), re-stage your real changes, and try again. To get RTS back, just rerun `make build-with-garmin` afterwards.
+…run `make clean-garmin` (which restores the stub from `.stub` backup), re-stage your real changes, and try again. To get RTS back, just rerun `make build-with-garmin` afterwards.
 
 ---
 

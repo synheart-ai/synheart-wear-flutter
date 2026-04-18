@@ -123,9 +123,20 @@ export 'src/adapters/android_health_helper.dart';
 // Wear Service (REST) for historical data backfill
 export 'src/wear/wear_service_client.dart';
 
-// Garmin SDK adapter (public facade only — full implementation is overlaid
-// from the private companion repo via `make build-with-garmin`).
+// Garmin SDK adapter — Dart side is fully open-source. Only the native
+// Kotlin wrapper (which depends on `com.garmin.health.*`) is overlaid from
+// the private companion repo via `make build-with-garmin`. Without that
+// overlay, every method that hits the platform channel returns a graceful
+// `UNAVAILABLE` PlatformException (caught and surfaced as `GarminSDKError`).
 export 'src/adapters/garmin/garmin.dart';
+
+// Garmin data models (devices, connection state, real-time/wellness/sleep/activity).
+export 'src/models/garmin_device.dart';
+export 'src/models/garmin_connection_state.dart';
+export 'src/models/garmin_realtime_data.dart';
+export 'src/models/garmin_wellness_data.dart';
+export 'src/models/garmin_sleep_data.dart';
+export 'src/models/garmin_activity_data.dart';
 
 // Generic wearable device types
 export 'src/models/wearable_device.dart';
