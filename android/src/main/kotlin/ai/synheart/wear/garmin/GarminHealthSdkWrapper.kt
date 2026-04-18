@@ -1,0 +1,1 @@
+/Volumes/YoIzzy/synheart/synheart-wear-flutter/.garmin/dart/android/src/main/kotlin/ai/synheart/wear/garmin/GarminHealthSdkWrapper.kt

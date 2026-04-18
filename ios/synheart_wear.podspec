@@ -37,14 +37,12 @@ and optional Garmin Companion SDK integration.
   # Without the SDK, Garmin methods will return "SDK not available" errors.
   # ============================================================================
 
-  # Uncomment after adding Companion.xcframework to ios/Frameworks/
-  # s.vendored_frameworks = 'Frameworks/Companion.xcframework'
+  s.vendored_frameworks = 'Frameworks/Companion.xcframework'
 
   # Weak linking allows app to run if SDK framework is not present at runtime
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    # Uncomment when SDK is present to enable weak linking
-    # 'OTHER_LDFLAGS' => '-weak_framework Companion',
+    'OTHER_LDFLAGS' => '-weak_framework Companion',
   }
 
   # Required frameworks for HealthKit
