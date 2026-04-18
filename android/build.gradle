@@ -23,30 +23,28 @@ allprojects {
         // GARMIN SDK INTEGRATION (Optional)
         // ========================================================================
         //
-        // The Garmin Health SDK requires a license from Garmin Health.
-        // Choose ONE of the following options:
+        // The Garmin Health SDK requires a license from Garmin Health and is
+        // currently pinned to v4.7.0. See ../GARMIN_SETUP.md for the full guide.
         //
-        // OPTION 1: Local AAR (Recommended for most users)
-        // ------------------------------------------------
-        // 1. Download the SDK AAR from GitHub:
-        //    https://github.com/garmin-health-sdk/android-sdk/packages
+        // OPTION 1: Local Maven layout (default — used by this plugin)
+        // ------------------------------------------------------------
+        // Drop the licensed AAR at:
+        //   android/repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar
+        // The matching .pom is already committed. The `maven { url ... }` block
+        // below resolves it. This works for both standalone apps and consumers
+        // where this plugin is a transitive library module.
         //
-        // 2. Copy the AAR to: android/libs/garmin-health-sdk.aar
-        //
-        // 3. The flatDir repository below will automatically find it.
-        //
-        // OPTION 2: Maven/GitHub Packages (Requires GitHub authentication)
-        // -----------------------------------------------------------------
-        // 1. Uncomment the maven block below
-        // 2. Set GITHUB_USER and GITHUB_TOKEN environment variables
-        //    OR add to local.properties:
+        // OPTION 2: GitHub Packages (requires GitHub authentication)
+        // ----------------------------------------------------------
+        // 1. Uncomment the maven block below.
+        // 2. Set GITHUB_USER and GITHUB_TOKEN env vars, or add to local.properties:
         //        gpr.user=YOUR_GITHUB_USERNAME
         //        gpr.key=YOUR_GITHUB_TOKEN
         //
-        // Without the SDK, Garmin methods will return "SDK not available" errors.
+        // Without the AAR, Garmin native methods return "SDK not available".
         // ========================================================================
 
-        // Local Maven repository for Garmin SDK AAR
+        // Local Maven repository for the Garmin SDK AAR (gitignored binary)
         maven {
             url "${project.projectDir}/repo"
         }
@@ -91,24 +89,17 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
     // ========================================================================
-    // GARMIN SDK DEPENDENCY
+    // GARMIN SDK DEPENDENCY (pinned to v4.7.0)
     // ========================================================================
     //
-    // Uncomment ONE of the following after adding the SDK:
-    //
-    // Garmin Health Companion SDK (local Maven repo)
+    // The default below is the Companion variant resolved from android/repo/.
+    // Switch to the standard variant if your users will run alongside the
+    // Garmin Connect Mobile app:
+    //   implementation 'com.garmin.health:standard-sdk:4.7.0'
+    // ========================================================================
     implementation 'com.garmin.health:companion-sdk:4.7.0'
-    //
-    // Option 2: Maven - Companion variant (for consumer apps)
-    // implementation 'com.garmin.health:companion-sdk:4.4.0'
-    //
-    // Option 3: Maven - Standard variant (for devices with Garmin Connect Mobile)
-    // implementation 'com.garmin.health:standard-sdk:4.4.0'
-    //
-    // ========================================================================
 
-    // Guava ListenableFuture (required when Garmin SDK is enabled)
-    // Required by Garmin SDK (ListenableFuture)
+    // Required by the Garmin SDK (ListenableFuture and friends).
     implementation 'com.google.guava:guava:32.1.3-android'
 
     // Coroutines for async operations

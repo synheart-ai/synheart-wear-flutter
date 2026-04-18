@@ -1,37 +1,60 @@
-# Android Garmin SDK Libraries
+# Android Garmin SDK Libraries (legacy)
 
-Place the Garmin Health SDK AAR file here.
+> **Heads-up** — as of `synheart_wear` 0.3.x targeting Garmin Health SDK **4.7.0**, this directory is **no longer the primary integration point**. The plugin now resolves the AAR through a local Maven layout under [`../repo/`](../repo/) so it works correctly when consumed from another Gradle library module (where `flatDir` doesn't propagate).
+>
+> See **[`../../GARMIN_SETUP.md`](../../GARMIN_SETUP.md)** for the current setup.
 
-## Setup Instructions
+## Current (recommended) layout — local Maven repo
 
-1. Download the SDK AAR from:
-   https://github.com/garmin-health-sdk/android-sdk/packages
-
-   Choose either:
-   - `companion-sdk` - Standalone (no Garmin Connect Mobile required)
-   - `standard-sdk` - Works with Garmin Connect Mobile
-
-2. Copy and rename the AAR:
-   ```bash
-   cp garmin-health-companion-sdk-X.X.X.aar libs/garmin-health-sdk.aar
-   # OR
-   cp garmin-health-standard-sdk-X.X.X.aar libs/garmin-health-sdk.aar
-   ```
-
-3. Update `../build.gradle`:
-   - Uncomment: `implementation(name: 'garmin-health-sdk', ext: 'aar')`
-   - Uncomment: `implementation 'com.google.guava:guava:32.1.3-android'`
-
-4. Rebuild your Android app
-
-## Expected Structure
+Place the licensed AAR at:
 
 ```
-libs/
-├── README.md
-└── garmin-health-sdk.aar
+android/repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar
+```
+
+The matching `.pom` is already committed. `android/build.gradle` is already wired up:
+
+```gradle
+repositories {
+    maven { url "${project.projectDir}/repo" }
+}
+
+dependencies {
+    implementation 'com.garmin.health:companion-sdk:4.7.0'
+    implementation 'com.google.guava:guava:32.1.3-android'
+}
+```
+
+```bash
+mkdir -p ../repo/com/garmin/health/companion-sdk/4.7.0
+cp garmin-health-companion-sdk-4.7.0.aar \
+   ../repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar
+```
+
+## Legacy layout — `flatDir` AAR drop (still supported for app-level integrations)
+
+If you're integrating Garmin **directly in your application module** (not via this plugin), Gradle's classic `flatDir` lookup still works:
+
+1. Download the SDK AAR from https://github.com/garmin-health-sdk/android-sdk/packages
+   (`companion-sdk` for standalone apps, `standard-sdk` for apps used alongside Garmin Connect Mobile).
+2. Copy and rename to this directory:
+
+   ```bash
+   cp garmin-health-companion-sdk-4.7.0.aar libs/garmin-health-sdk.aar
+   ```
+
+3. Add to your **app** `build.gradle`:
+
+   ```gradle
+   repositories {
+       flatDir { dirs 'libs' }
+   }
+   dependencies {
+       implementation(name: 'garmin-health-sdk', ext: 'aar')
+       implementation 'com.google.guava:guava:32.1.3-android'
+   }
 ```
 
 ## Note
 
-The Garmin SDK requires a commercial license. Contact Garmin Health for licensing.
+The Garmin SDK requires a commercial license. Contact Garmin Health for licensing — see [`../../GARMIN_SETUP.md`](../../GARMIN_SETUP.md).
