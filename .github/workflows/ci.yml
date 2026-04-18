@@ -7,6 +7,14 @@ on:
       - main
 
 jobs:
+  garmin-overlay-guard:
+    name: Garmin overlay safety check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no Garmin companion overlay symlinks landed in tree
+        run: make verify-clean
+
   test:
     name: Analyze & Test (Flutter ${{ matrix.flutter }})
     runs-on: ubuntu-latest
