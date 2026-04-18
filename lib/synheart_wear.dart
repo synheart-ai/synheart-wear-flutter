@@ -125,12 +125,14 @@ export 'src/wear/wear_service_client.dart';
 
 // Garmin SDK adapter (public facade only)
 export 'src/adapters/garmin/garmin.dart';
+export 'src/adapters/garmin/garmin_platform_channel.dart';
 
 // Generic wearable device types
 export 'src/models/wearable_device.dart';
 
 // HealthKit / Health Connect
 export 'src/adapters/health_adapter.dart';
+export 'src/adapters/healthkit_rr_channel.dart';
 
 // BLE Heart Rate Monitor
 export 'src/adapters/ble_hrm_models.dart';

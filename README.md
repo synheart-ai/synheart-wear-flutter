@@ -169,8 +169,10 @@ print(metrics.batteryLevel);                     // 0.82
 | Health Connect | Android     | ✅ Ready          |
 | Whoop          | iOS/Android | ✅ Ready          |
 | Fitbit         | iOS/Android | 🔄 In Development |
-| Garmin         | iOS/Android | 🔄 In Development |
+| Garmin (RTS)   | iOS/Android | ✅ Ready (license required — see [`GARMIN_SETUP.md`](GARMIN_SETUP.md)) |
 | Samsung Watch  | Android     | 📋 Planned        |
+
+> **Garmin RTS** ships behind a license. The open-source build includes a stub `GarminHealth` facade; the real native implementation (Companion SDK 4.7.0 on iOS + Android) is overlaid from the private `synheart-wear-garmin-companion` repo via `make build-with-garmin`. See [`GARMIN_SETUP.md`](GARMIN_SETUP.md) for the full workflow.
 
 ## ⚙️ Platform Configuration
 
@@ -259,7 +261,7 @@ This package **does not generate HSI** and **does not bundle Flux binaries**.
 
 ### Fetching Raw Data for Flux
 
-Both `WhoopProvider` and `GarminProvider` include `fetchRawDataForFlux()` methods that fetch and format vendor data for Flux processing:
+`WhoopProvider` exposes a `fetchRawDataForFlux()` method that fetches and formats vendor data for Flux processing:
 
 **WHOOP:**
 ```dart
@@ -272,21 +274,11 @@ final rawData = await whoopProvider.fetchRawDataForFlux(
 // Returns: { 'sleep': [...], 'recovery': [...], 'cycle': [...] }
 ```
 
-**Garmin:**
-```dart
-final garminProvider = GarminProvider(appId: 'your-app-id', userId: 'user-123');
-final rawData = await garminProvider.fetchRawDataForFlux(
-  start: DateTime.now().subtract(const Duration(days: 30)),
-  end: DateTime.now(),
-);
-// Returns: { 'dailies': [...], 'sleep': [...] }
-```
-
-These methods automatically:
-- Fetch data from the appropriate vendor endpoints
-- Transform data to match Flux's expected format
-- Handle missing fields and data validation
-- Return data ready for Flux processing
+This method automatically:
+- Fetches data from the appropriate vendor endpoints
+- Transforms data to match Flux's expected format
+- Handles missing fields and data validation
+- Returns data ready for Flux processing
 
 ## 📖 Additional Resources
 

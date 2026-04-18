@@ -1,21 +1,48 @@
 # Garmin Health SDK Integration Guide
 
-This guide explains how to integrate the Garmin Health SDK with synheart_wear for real-time health data streaming from Garmin wearables.
+This guide explains how to integrate the Garmin Health SDK with `synheart_wear` for real-time health data streaming (RTS) from Garmin wearables.
+
+> **TL;DR** — get a Garmin Health SDK license, drop the iOS XCFramework into `ios/Frameworks/` and the Android AAR into `android/repo/com/garmin/health/companion-sdk/4.7.0/`, then run `make build-with-garmin` from the package root to overlay the real RTS implementation.
+
+## Architecture overview
+
+The Dart-side `GarminHealth` facade lives in this open-source repo, but its **real implementation** ships from a private companion repository (`synheart-wear-garmin-companion`) because it links against the licensed Garmin SDK. The `Makefile` automates the overlay:
+
+| Layer                     | Open-source stub                              | Licensed implementation                                  |
+| ------------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| Dart facade               | `lib/src/adapters/garmin/garmin_health.dart`  | `.garmin/dart/lib/src/adapters/garmin/garmin_health.dart`|
+| Dart adapter / channels   | _(absent in stub mode)_                       | `.garmin/dart/lib/src/adapters/garmin/*.dart`            |
+| Garmin data models        | _(absent in stub mode)_                       | `.garmin/dart/lib/src/models/garmin_*.dart`              |
+| Android native bridge     | `android/.../GarminSDKBridge.kt` (stub)       | `.garmin/dart/android/.../GarminSDKBridge.kt` + wrappers |
+| iOS native bridge         | `ios/Classes/Garmin/GarminSDKBridge.swift`    | _(in-tree; conditionally compiled with `Companion`)_     |
+
+`make link-garmin` swaps stubs for symlinks into `.garmin/`. `.garmin/` is gitignored in this repo, so the symlinked files never end up in the open-source tree.
+
+---
 
 ## Prerequisites
 
 ### 1. Obtain a Garmin Health SDK License
 
-The Garmin Health SDK is **not open source** and requires a commercial license from Garmin.
+The Garmin Health SDK is **not open source** and requires a commercial license from Garmin. Currently we target **SDK v4.7.0** on both platforms.
 
 1. Contact Garmin Health to discuss licensing: https://developer.garmin.com/health-api/overview/
 2. You will receive:
    - SDK license key(s) tied to your app's bundle ID / package name
-   - Access to the private GitHub repositories containing the SDK
+   - Access to the private GitHub repositories containing the SDK binaries
 
-### 2. GitHub Access Token
+### 2. Companion repo access (recommended)
 
-Both iOS and Android SDKs are distributed via private GitHub repositories. You need a Personal Access Token with the following permissions:
+If your team has been added to the private companion repo, the build pipeline will pull the real implementation automatically:
+
+- Repo: `git@github.com:synheart-ai/synheart-wear-garmin-companion.git`
+- Verify access: `make check-garmin`
+
+Without companion access the build still succeeds but `GarminHealth.startScanning() / pairDevice() / startStreaming()` throw `UnsupportedError`. All non-Garmin adapters (Apple HealthKit, Health Connect, Whoop, BLE HRM, …) are unaffected.
+
+### 3. GitHub Access Token (only for Maven/GitHub Packages flow)
+
+Required only if you choose the GitHub Packages route instead of the local Maven layout.
 
 - `read:packages`
 - `repo`
@@ -24,113 +51,92 @@ Create one at: https://github.com/settings/tokens
 
 ---
 
-## iOS Setup
+## iOS Setup (Companion SDK 4.7.0)
 
-### Option 1: Swift Package Manager (Recommended)
+### Option 1: Swift Package Manager
 
-If you're using the SDK directly in your app (not through this plugin):
+Use this if you're integrating Garmin in your app **directly** (not through this plugin).
 
-1. In Xcode, go to **File > Add Package Dependencies**
+1. In Xcode, choose **File ▸ Add Package Dependencies**
 2. Enter: `https://github.com/garmin-health-sdk/ios-companion`
-3. Authenticate with your GitHub credentials
+3. Authenticate with your GitHub credentials and pin to `4.7.0` or later
 
-### Option 2: Manual XCFramework Integration
-
-For Flutter plugin integration:
+### Option 2: XCFramework into the plugin (used by this Flutter plugin)
 
 1. **Download the SDK**
 
-   Go to: https://github.com/garmin-health-sdk/ios-companion/releases
+   Go to: https://github.com/garmin-health-sdk/ios-companion/releases and download `Companion.xcframework-4.7.x.zip`.
 
-   Download the `Companion.xcframework-X.X.X.zip` file from the latest release.
-
-2. **Extract and Copy**
+2. **Extract and copy**
 
    ```bash
-   # Extract the downloaded file
-   unzip Companion.xcframework-X.X.X.zip
-
-   # Create the Frameworks directory in the plugin
+   unzip Companion.xcframework-4.7.x.zip
    mkdir -p ios/Frameworks
-
-   # Copy the XCFramework
    cp -R Companion.xcframework ios/Frameworks/
    ```
 
-3. **Update the Podspec**
+3. **Podspec is already wired**
 
-   Edit `ios/synheart_wear.podspec` and uncomment the vendored framework line:
+   `ios/synheart_wear.podspec` already contains:
 
    ```ruby
-   # Change this:
-   # s.vendored_frameworks = 'Frameworks/Companion.xcframework'
-
-   # To this:
    s.vendored_frameworks = 'Frameworks/Companion.xcframework'
-   ```
-
-4. **Update Pod Configuration**
-
-   Also uncomment the weak linking flag:
-
-   ```ruby
    s.pod_target_xcconfig = {
      'DEFINES_MODULE' => 'YES',
-     'OTHER_LDFLAGS' => '-weak_framework Companion',  # Uncomment this
+     'OTHER_LDFLAGS'  => '-weak_framework Companion',
    }
    ```
 
-5. **Reinstall Pods**
+   The framework is **weak-linked**, so apps that do not ship the binary still launch — Garmin methods just throw `"SDK not available"`.
+
+4. **Reinstall pods** in your consuming app:
 
    ```bash
-   cd ios
-   pod deintegrate
-   pod install
+   cd ios && pod deintegrate && pod install
    ```
+
+> **Note** — the iOS Companion SDK 4.x renamed several APIs (`heartRateVariability` → `beatToBeatInterval`, `spo2` → `oxygenLevel`, `respirationRate` → `breathsPerMinute`, `bodyBattery` → `bodyBatteryLevel`, `accelerometer.x/y/z` → `xValue/yValue/zValue`, sync direction `.download` → `.toPhone`, `DeviceType.all` → `DeviceType.allKnown`). Our `GarminSDKBridge.swift` is already updated for these. If you bump the SDK further, re-check those mappings.
 
 ---
 
-## Android Setup
+## Android Setup (Companion SDK 4.7.0)
 
-### Option 1: Local AAR (Recommended)
+The plugin uses a **local Maven repository** under `android/repo/`. This works for both library-module consumers (where `flatDir` doesn't propagate) and standalone apps.
 
-1. **Download the SDK**
+### Option 1: Local Maven layout (recommended)
 
-   Go to: https://github.com/garmin-health-sdk/android-sdk/packages
+1. **Download the SDK AAR**
 
-   Choose either:
-   - `companion-sdk` - For standalone apps (no Garmin Connect Mobile required)
-   - `standard-sdk` - For apps used alongside Garmin Connect Mobile
+   Go to: https://github.com/garmin-health-sdk/android-sdk/packages and download the `companion-sdk` (or `standard-sdk`) AAR for **4.7.0**.
 
-   Download the AAR file from the package assets.
-
-2. **Copy to Plugin**
+2. **Drop it into the local Maven layout**
 
    ```bash
-   # Create the libs directory
-   mkdir -p android/libs
-
-   # Copy and rename the AAR
-   cp garmin-health-companion-sdk-X.X.X.aar android/libs/garmin-health-sdk.aar
+   mkdir -p android/repo/com/garmin/health/companion-sdk/4.7.0
+   cp companion-sdk-4.7.0.aar \
+      android/repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar
    ```
 
-3. **Update build.gradle**
+   The matching POM (`companion-sdk-4.7.0.pom`) is already committed in the repo.
 
-   Edit `android/build.gradle` and uncomment the SDK dependency:
+3. **`android/build.gradle` is already wired**
 
    ```gradle
-   dependencies {
-       // Uncomment this line:
-       implementation(name: 'garmin-health-sdk', ext: 'aar')
+   repositories {
+       maven { url "${project.projectDir}/repo" }   // local Garmin Maven layout
+   }
 
-       // Also uncomment Guava (required by SDK):
+   dependencies {
+       implementation 'com.garmin.health:companion-sdk:4.7.0'
        implementation 'com.google.guava:guava:32.1.3-android'
    }
    ```
 
-### Option 2: Maven/GitHub Packages
+4. Rebuild your app: `flutter clean && flutter pub get && cd android && ./gradlew assembleDebug`.
 
-1. **Set GitHub Credentials**
+### Option 2: GitHub Packages
+
+1. **Set GitHub credentials**
 
    Add to your app's `local.properties`:
 
@@ -139,19 +145,11 @@ For Flutter plugin integration:
    gpr.key=YOUR_GITHUB_TOKEN
    ```
 
-   Or set environment variables:
+   …or export `GITHUB_USER` / `GITHUB_TOKEN` env vars.
 
-   ```bash
-   export GITHUB_USER=your_username
-   export GITHUB_TOKEN=your_token
-   ```
-
-2. **Update build.gradle**
-
-   Edit `android/build.gradle`:
+2. **Uncomment the Maven block** in `android/build.gradle`:
 
    ```gradle
-   // Uncomment the maven block in repositories:
    maven {
        url 'https://maven.pkg.github.com/garmin-health-sdk/android-sdk'
        credentials {
@@ -159,45 +157,46 @@ For Flutter plugin integration:
            password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN") ?: ""
        }
    }
-
-   // And uncomment one of these in dependencies:
-   implementation 'com.garmin.health:companion-sdk:4.4.0'
-   // OR
-   implementation 'com.garmin.health:standard-sdk:4.4.0'
-
-   // Plus Guava:
-   implementation 'com.google.guava:guava:32.1.3-android'
    ```
+
+   …and switch the dependency line if you want the standard variant:
+
+   ```gradle
+   // implementation 'com.garmin.health:standard-sdk:4.7.0'
+   ```
+
+> **Note** — Android Companion SDK 4.7.0 renamed several APIs (`addDevicePairedStateListener` → `addPairedStateListener`, `device.batteryLevel()` → `device.batteryPercentage()`, `device.unitId()` is now non-nullable, and `RealTimeHRV.beatToBeatIntervals` was dropped). Our `GarminHealthSdkWrapper.kt` is already updated for these.
 
 ---
 
 ## Building with Garmin RTS Support
 
-The real-time streaming (RTS) code lives in a private companion repo and is linked at build time via `make`:
+The real-time streaming (RTS) source lives in the private companion repo and is overlaid at build time:
 
 ```bash
-# Auto-detect companion access and build accordingly
-make build
-
-# Or explicitly:
-make build-with-garmin     # requires companion repo access
-make build-without-garmin  # stub-only (scanning/pairing throw UnsupportedError)
-make check-garmin          # verify you have access
-make clean-garmin          # remove .garmin/ and symlinks
+make build                  # auto-detect: with companion if accessible, otherwise stub
+make build-with-garmin      # explicit: requires companion repo access
+make build-without-garmin   # explicit: stub-only build (RTS calls throw UnsupportedError)
+make check-garmin           # verify your SSH access to the companion repo
+make clean-garmin           # remove .garmin/ and dangling symlinks
 ```
 
-Without the companion, `GarminHealth` methods like `startScanning()`, `pairDevice()`, and `startStreaming()` throw `UnsupportedError`. Cloud-based Garmin data via `GarminProvider` (OAuth + webhooks) works regardless.
+What `make build-with-garmin` does:
+
+1. `fetch-garmin` — shallow-clones the companion repo into `.garmin/` (or `git pull --ff-only` if already present)
+2. `link-garmin` — symlinks the licensed Dart, model, and Android-bridge files from `.garmin/dart/...` over the open-source stubs
+
+The `.garmin/` directory and all symlinks are listed in `.gitignore`, so they never get committed back to the open-source repo.
 
 ---
 
 ## Dart Usage
 
-Once the native SDK is configured and built with companion support, use `GarminHealth`:
+Once the native SDK is configured **and** you've run a `make build-with-garmin`, use the `GarminHealth` facade:
 
 ```dart
 import 'package:synheart_wear/synheart_wear.dart';
 
-// Create and initialize GarminHealth
 final garmin = GarminHealth(licenseKey: 'YOUR_LICENSE_KEY');
 await garmin.initialize();
 
@@ -207,46 +206,50 @@ final synheart = SynheartWear(
   garminHealth: garmin,
 );
 
-// Scan for devices
+// Scan
 await garmin.startScanning();
 garmin.scannedDevicesStream.listen((devices) {
-  for (final device in devices) {
-    print('Found: ${device.name} (${device.identifier})');
+  for (final d in devices) {
+    print('Found: ${d.name} (${d.identifier})');
   }
 });
 
-// Pair a device
+// Pair
 final paired = await garmin.pairDevice(scannedDevice);
 
-// Start real-time streaming
+// Real-time streaming
 await garmin.startStreaming(device: paired);
 garmin.realTimeStream.listen((metrics) {
-  print('Heart Rate: ${metrics.getMetric(MetricType.hr)}');
+  print('HR: ${metrics.getMetric(MetricType.hr)}');
 });
 
-// Clean up
+// Cleanup
 synheart.dispose();
 ```
+
+In stub-only builds, `initialize()` succeeds but the scanning/pairing/streaming methods throw `UnsupportedError`.
 
 ---
 
 ## SDK Variant Comparison
 
-| Feature | Companion SDK | Standard SDK |
-|---------|--------------|--------------|
-| Garmin Connect Mobile Required | No | Yes |
-| Direct Bluetooth Connection | Yes | No |
-| Works Offline | Yes | Yes |
-| Real-time Data | Yes | Yes |
-| Activity Sync | Via SDK | Via GCM |
-| Platform | iOS, Android | Android only |
+| Feature                        | Companion SDK | Standard SDK   |
+| ------------------------------ | ------------- | -------------- |
+| Garmin Connect Mobile required | No            | Yes            |
+| Direct Bluetooth connection    | Yes           | No             |
+| Works offline                  | Yes           | Yes            |
+| Real-time data                 | Yes           | Yes            |
+| Activity sync                  | Via SDK       | Via GCM        |
+| Platform                       | iOS, Android  | Android only   |
 
 **Choose Companion SDK** if:
+
 - Your users may not have Garmin Connect Mobile installed
 - You need direct Bluetooth communication
 - You're targeting iOS
 
 **Choose Standard SDK** if:
+
 - Your users will have Garmin Connect Mobile
 - You want to leverage GCM's existing device connection
 
@@ -254,23 +257,26 @@ synheart.dispose();
 
 ## Troubleshooting
 
-### "SDK not available" Error
+### `SDK not available` error at runtime
 
-This means the SDK binary is not linked. Verify:
+The native binary isn't linked. Verify:
 
-1. **iOS**: `Companion.xcframework` exists in `ios/Frameworks/`
-2. **Android**: `garmin-health-sdk.aar` exists in `android/libs/`
-3. The dependency is uncommented in podspec/build.gradle
-4. You've run `pod install` (iOS) or clean build (Android)
+1. **iOS** — `ios/Frameworks/Companion.xcframework/` exists and `pod install` was rerun.
+2. **Android** — `android/repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar` exists.
+3. The Dart side was overlaid via `make build-with-garmin` (otherwise you're hitting the stub).
 
-### "License invalid" Error
+### `License invalid` error
 
-- Ensure your license key matches your app's bundle ID / package name
-- Contact Garmin support if the issue persists
+- Ensure your license key matches your app's bundle ID / package name exactly.
+- Contact Garmin support if it persists.
 
-### Bluetooth Permission Errors
+### `Skipping unsupported real-time type: …`
 
-**iOS**: Add to `Info.plist`:
+This is **expected** on devices that don't support a particular metric (e.g. SpO2 on entry-level trackers). The bridge enables each `RealTimeDataType` individually so a single unsupported type doesn't fail the whole streaming session.
+
+### Bluetooth permission errors
+
+**iOS** — add to `Info.plist`:
 
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
@@ -279,7 +285,7 @@ This means the SDK binary is not linked. Verify:
 <string>Required for Garmin device connection</string>
 ```
 
-**Android**: Add to `AndroidManifest.xml`:
+**Android** — add to `AndroidManifest.xml`:
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH" />
@@ -289,40 +295,44 @@ This means the SDK binary is not linked. Verify:
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 ```
 
-### Build Errors
+### Build errors
 
-**iOS - "No such module 'Companion'"**:
-- The XCFramework is not properly linked
-- Run `pod deintegrate && pod install`
+**iOS — `No such module 'Companion'`** — XCFramework not vendored. Confirm the file is in `ios/Frameworks/` and rerun `pod deintegrate && pod install`.
 
-**Android - "Unresolved reference: GarminHealth"**:
-- The AAR is not found
-- Check that the file exists and build.gradle dependency is uncommented
+**Android — `Could not find com.garmin.health:companion-sdk:4.7.0`** — AAR is missing from `android/repo/com/garmin/health/companion-sdk/4.7.0/`. Drop in the licensed AAR (the matching `.pom` is already committed).
+
+**Dart — `Unresolved reference: GarminAdapter`** — you're in stub mode. Run `make build-with-garmin` (requires companion repo access).
 
 ---
 
 ## Directory Structure
 
-After setup, your project should look like:
+After a full setup with companion access, the package looks like:
 
 ```
 synheart_wear/
+├── .garmin/                                              # ← cloned by `make fetch-garmin` (gitignored)
+│   ├── dart/lib/src/adapters/garmin/*.dart               # ← real Garmin adapter sources
+│   ├── dart/lib/src/models/garmin_*.dart                 # ← real Garmin data models
+│   └── dart/android/.../GarminSDKBridge.kt + wrappers    # ← real Android bridge
 ├── android/
-│   ├── libs/
-│   │   └── garmin-health-sdk.aar    # <-- Add this
-│   └── build.gradle                  # <-- Uncomment SDK dependency
+│   ├── build.gradle                                      # ← wired for SDK 4.7.0
+│   └── repo/com/garmin/health/companion-sdk/4.7.0/
+│       ├── companion-sdk-4.7.0.pom                       # committed
+│       └── companion-sdk-4.7.0.aar                       # ← drop in licensed AAR (gitignored)
 ├── ios/
+│   ├── synheart_wear.podspec                             # ← wired for Companion.xcframework
 │   ├── Frameworks/
-│   │   └── Companion.xcframework/    # <-- Add this
-│   └── synheart_wear.podspec         # <-- Uncomment vendored_frameworks
-└── lib/
-    └── ...
+│   │   └── Companion.xcframework/                        # ← drop in licensed framework (gitignored)
+│   └── Classes/Garmin/GarminSDKBridge.swift              # in-tree, conditionally compiled
+├── lib/src/adapters/garmin/                              # symlinks into `.garmin/` after overlay
+└── lib/src/models/                                       # symlinks into `.garmin/` after overlay
 ```
 
 ---
 
 ## Support
 
-- **Garmin SDK Issues**: Contact Garmin Health SDK Support
-- **Plugin Issues**: https://github.com/synheart-ai/synheart_wear/issues
-- **SDK Documentation**: Available in the SDK release packages
+- **Garmin SDK issues** — Garmin Health SDK Support
+- **Plugin issues** — https://github.com/synheart-ai/synheart_wear/issues
+- **Companion repo access** — opensource@synheart.ai

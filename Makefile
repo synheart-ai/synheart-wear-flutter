@@ -54,10 +54,10 @@ link-garmin:
 			lib/src/models/$$f; \
 	done
 	@# Link Android native bridges
-	@mkdir -p android/src/main/kotlin/com/synheart/wear/garmin
+	@mkdir -p android/src/main/kotlin/ai/synheart/wear/garmin
 	@for f in GarminSDKBridge.kt GarminSdkWrapper.kt GarminHealthSdkWrapper.kt; do \
-		ln -sf $$(pwd)/.garmin/$(GARMIN_SUBDIR)/android/src/main/kotlin/com/synheart/wear/garmin/$$f \
-			android/src/main/kotlin/com/synheart/wear/garmin/$$f; \
+		ln -sf $$(pwd)/.garmin/$(GARMIN_SUBDIR)/android/src/main/kotlin/ai/synheart/wear/garmin/$$f \
+			android/src/main/kotlin/ai/synheart/wear/garmin/$$f; \
 	done
 	@echo "✓ Garmin RTS files linked"
 
@@ -67,5 +67,5 @@ clean-garmin:
 	@# Remove symlinks (they become dangling after .garmin/ removal)
 	@find lib/src/adapters/garmin/ -type l -delete 2>/dev/null || true
 	@find lib/src/models/ -name 'garmin_*' -type l -delete 2>/dev/null || true
-	@find android/src/main/kotlin/com/synheart/wear/garmin/ -type l -delete 2>/dev/null || true
+	@find android/src/main/kotlin/ai/synheart/wear/garmin/ -type l -delete 2>/dev/null || true
 	@echo "✓ Garmin RTS files cleaned"

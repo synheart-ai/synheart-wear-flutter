@@ -228,7 +228,7 @@ public class GarminSDKBridge: NSObject {
         let deviceTypeStrings = args?["deviceTypes"] as? [String]
 
         // Convert string device types to SDK types
-        var deviceTypes: [DeviceType] = [.all]
+        var deviceTypes: [DeviceType] = DeviceType.allKnown
         if let typeStrings = deviceTypeStrings {
             deviceTypes = typeStrings.compactMap { parseDeviceType($0) }
         }
@@ -253,7 +253,7 @@ public class GarminSDKBridge: NSObject {
     private func handleStopScanning(result: @escaping FlutterResult) {
         #if canImport(Companion)
         try? DeviceManager.shared.stopScanning()
-        scannedDevicesCache.removeAll()
+        // Keep scannedDevicesCache — pairDevice needs it after scan stops
         #endif
         result(nil)
     }
@@ -516,7 +516,7 @@ public class GarminSDKBridge: NSObject {
         var realTimeTypes: RealTimeTypes = [
             .heartRate,
             .stress,
-            .heartRateVariability,
+            .beatToBeatInterval,
             .spo2,
             .respiration,
             .bodyBattery,
@@ -534,17 +534,39 @@ public class GarminSDKBridge: NSObject {
             }
         }
 
+        // If no active device, try to use first paired device
+        if activeDevice == nil {
+            if let paired = try? DeviceManager.shared.getPairedDevices(),
+               let first = paired.first {
+                activeDevice = first
+            }
+        }
+
         if let device = activeDevice {
             device.add(realTimeDelegate: self)
-            do {
-                try device.startListening(for: realTimeTypes)
-                result(nil)
-            } catch {
+            // Request each type individually — some types may not be supported
+            // on all Garmin devices and would cause the entire batch to fail.
+            let allKnownTypes: [RealTimeTypes] = [
+                .heartRate, .stress, .beatToBeatInterval, .spo2,
+                .respiration, .bodyBattery, .steps, .accelerometer,
+            ]
+            var enabledTypes: RealTimeTypes = []
+            for type in allKnownTypes where realTimeTypes.contains(type) {
+                do {
+                    try device.startListening(for: type)
+                    enabledTypes.insert(type)
+                } catch {
+                    NSLog("[GarminSDK] Skipping unsupported real-time type: \(type) — \(error.localizedDescription)")
+                }
+            }
+            if enabledTypes.isEmpty {
                 result(FlutterError(
                     code: "STREAMING_FAILED",
-                    message: error.localizedDescription,
+                    message: "No supported real-time types on this device",
                     details: nil
                 ))
+            } else {
+                result(nil)
             }
         } else {
             result(FlutterError(
@@ -564,7 +586,7 @@ public class GarminSDKBridge: NSObject {
             device.stopListening(for: [
                 .heartRate,
                 .stress,
-                .heartRateVariability,
+                .beatToBeatInterval,
                 .spo2,
                 .respiration,
                 .bodyBattery,
@@ -638,7 +660,7 @@ public class GarminSDKBridge: NSObject {
                         return [
                             "ssid": ap.ssid,
                             "signalStrength": ap.signalStrength,
-                            "isSecured": ap.isSecured
+                            "isSecured": ap.securityType != .open
                         ]
                     }
                     await MainActor.run {
@@ -711,55 +733,36 @@ public class GarminSDKBridge: NSObject {
             "identifier": device.identifier.uuidString,
             "name": device.name,
             "type": deviceTypeToString(device.type),
-            "rssi": device.rssi,
             "isPaired": false
         ]
     }
 
     private func deviceTypeToString(_ type: DeviceType) -> String {
-        switch type {
-        case .all:
-            return "unknown"
-        case .vivosmart:
+        let name = String(describing: type)
+        if name.lowercased().contains("vivo") || name.lowercased().contains("venu") || name.lowercased().contains("lily") {
             return "fitness_tracker"
-        case .vivoactive:
-            return "fitness_tracker"
-        case .venu:
-            return "fitness_tracker"
-        case .forerunner:
+        } else if name.lowercased().contains("forerunner") {
             return "running_watch"
-        case .fenix:
+        } else if name.lowercased().contains("fenix") || name.lowercased().contains("instinct") || name.lowercased().contains("enduro") || name.lowercased().contains("tactix") || name.lowercased().contains("epix") || name.lowercased().contains("marq") {
             return "outdoor_watch"
-        case .instinct:
-            return "outdoor_watch"
-        case .edge:
+        } else if name.lowercased().contains("edge") {
             return "cycling_computer"
-        case .descent:
+        } else if name.lowercased().contains("descent") {
             return "diving_watch"
-        case .d2:
+        } else if name.lowercased().contains("d2") {
             return "aviation_watch"
-        case .approach:
+        } else if name.lowercased().contains("approach") {
             return "golf_watch"
-        default:
-            return "unknown"
+        } else if name.lowercased().contains("hrm") {
+            return "heart_rate_monitor"
         }
+        return "unknown"
     }
 
     private func parseDeviceType(_ typeString: String) -> DeviceType? {
-        switch typeString.lowercased() {
-        case "fitness_tracker", "vivosmart", "vivoactive", "venu":
-            return .venu
-        case "running_watch", "forerunner":
-            return .forerunner
-        case "outdoor_watch", "fenix", "instinct":
-            return .fenix
-        case "cycling_computer", "edge":
-            return .edge
-        case "all", "unknown":
-            return .all
-        default:
-            return .all
-        }
+        // Return nil to use allKnown default; specific model filtering
+        // is not practical with 100+ individual device type enum cases.
+        return nil
     }
 
     private func parseRealTimeType(_ typeString: String) -> RealTimeTypes? {
@@ -768,8 +771,8 @@ public class GarminSDKBridge: NSObject {
             return .heartRate
         case "stress":
             return .stress
-        case "hrv", "heart_rate_variability":
-            return .heartRateVariability
+        case "hrv", "heart_rate_variability", "bbi", "beat_to_beat":
+            return .beatToBeatInterval
         case "spo2":
             return .spo2
         case "respiration":
@@ -834,7 +837,7 @@ extension GarminSDKBridge: @preconcurrency SyncDelegate {
     }
 
     public func progress(uuid: UUID, amount: Double, direction: SyncDirection) {
-        let directionString = direction == .download ? "download" : "upload"
+        let directionString = direction == .toPhone ? "download" : "upload"
         syncProgressHandler?.sendSyncProgress(progress: amount, direction: directionString, deviceId: 0)
     }
 
@@ -858,23 +861,20 @@ extension GarminSDKBridge: @preconcurrency RealTimeDelegate {
             data["stress"] = stress
         }
 
-        if let hrv = results.heartRateVariability {
-            data["hrv"] = hrv
+        if let bbi = results.bbi {
+            data["hrv"] = bbi
+            data["bbiIntervals"] = [Double(bbi)]
         }
 
-        if let bbi = results.beatToBeatIntervals, !bbi.isEmpty {
-            data["bbiIntervals"] = bbi.map { Double($0) }
-        }
-
-        if let spo2 = results.spo2 {
+        if let spo2 = results.oxygenLevel {
             data["spo2"] = spo2
         }
 
-        if let respiration = results.respirationRate {
+        if let respiration = results.breathsPerMinute {
             data["respiration"] = respiration
         }
 
-        if let bodyBattery = results.bodyBattery {
+        if let bodyBattery = results.bodyBatteryLevel {
             data["bodyBattery"] = bodyBattery
         }
 
@@ -884,9 +884,9 @@ extension GarminSDKBridge: @preconcurrency RealTimeDelegate {
 
         if let accel = results.accelerometerSamples?.last {
             data["accelerometer"] = [
-                "x": accel.x,
-                "y": accel.y,
-                "z": accel.z,
+                "x": accel.xValue,
+                "y": accel.yValue,
+                "z": accel.zValue,
                 "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
             ]
         }

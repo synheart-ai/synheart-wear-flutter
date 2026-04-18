@@ -1,0 +1,1 @@
+/Volumes/YoIzzy/synheart/synheart-wear-flutter/.garmin/dart/lib/src/adapters/garmin/garmin_platform_channel.dart

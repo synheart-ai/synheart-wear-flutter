@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Garmin Health SDK v4.7.0 integration** — bumped both iOS Companion XCFramework and Android Companion AAR to v4.7.0.
+- **Companion overlay workflow** — `make build-with-garmin` clones the private `synheart-wear-garmin-companion` repo into `.garmin/` and symlinks the licensed Dart adapter, models, and Android bridge over the open-source stubs. Stub-only builds remain fully supported (`make build-without-garmin`); RTS calls then throw `UnsupportedError`.
+- **Local Maven repo for the Android AAR** — `android/repo/com/garmin/health/companion-sdk/4.7.0/` (POM committed, AAR gitignored). Resolves correctly when the plugin is consumed as a transitive Gradle library module.
+- **Public exports** — `lib/synheart_wear.dart` now re-exports `GarminPlatformChannel` and `HealthKitRRChannel` for advanced/native-channel callers.
+- **iOS framework wiring** — `ios/synheart_wear.podspec` now vendors `Frameworks/Companion.xcframework` with `-weak_framework Companion` by default; apps without the binary still launch.
+
+### Changed
+
+- **iOS bridge (`GarminSDKBridge.swift`)** updated for Companion SDK 4.x API changes:
+  - `DeviceType.all` → `DeviceType.allKnown` (and name-based string matching for the now-100+ device-type cases)
+  - `RealTimeTypes.heartRateVariability` → `.beatToBeatInterval`
+  - `RealTimeResults.spo2` → `.oxygenLevel`, `.respirationRate` → `.breathsPerMinute`, `.bodyBattery` → `.bodyBatteryLevel`
+  - `Accelerometer.x/y/z` → `.xValue/.yValue/.zValue`
+  - `SyncDirection.download` → `.toPhone`
+  - `AccessPoint.isSecured` → `.securityType != .open`
+  - `Device.rssi` removed from snapshot dict (no longer exposed by the SDK)
+  - Per-type `startListening` so a device that doesn't support one metric (e.g. SpO2) doesn't fail the whole streaming session; falls back to the first paired device when no scan-derived `activeDevice` is available.
+  - `scannedDevicesCache` is no longer cleared on `stopScanning` so `pairDevice` keeps working after the scan ends.
+- **Android wrapper (`GarminHealthSdkWrapper.kt`, in companion repo)** updated for Companion SDK 4.7.0 API changes:
+  - `addDevicePairedStateListener` / `removeDevicePairedStateListener` → `addPairedStateListener` / `removePairedStateListener`
+  - `device.unitId()` is now non-nullable (`Long`), no more `?.toInt()`
+  - `device.batteryLevel()` → `device.batteryPercentage()`
+  - Per-type `enableRealTimeData` for graceful degradation on unsupported metrics
+  - Removed `RealTimeHRV.beatToBeatIntervals` (dropped upstream)
+- **Garmin device manager** — calls `GarminPlatformChannel.isInitialized()` first and only invokes `initializeSDK` when needed, so a re-initialize from a screen that already owns the SDK no longer fails.
+
+### Documentation
+
+- Rewrote `GARMIN_SETUP.md` for SDK 4.7.0, the `.garmin/` companion repo overlay, and the `android/repo/` local Maven layout.
+- Refreshed `android/libs/README.md` (now legacy/`flatDir` only) and `ios/Frameworks/README.md` (podspec is wired by default).
+- Added the `android/repo/README.md` describing the licensed local Maven layout.
+- Top-level `README.md` now lists Garmin RTS as Ready (license required) and links to `GARMIN_SETUP.md`.
+
 ## [0.3.1] - 2026-02-18
 
 ### Changed
