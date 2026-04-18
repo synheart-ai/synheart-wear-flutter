@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Stripped accidentally-committed Garmin companion symlinks** — PR #23 merged 14 symlinks pointing into `.garmin/` (the gitignored licensed companion overlay) onto `main`. The targets used absolute developer paths so the links were dangling for every other consumer and would have broken `pub publish`. Restored the original open-source stubs for `lib/src/adapters/garmin/garmin_health.dart` and `android/.../GarminSDKBridge.kt`, deleted the 12 spurious entries, and removed the now-invalid `GarminPlatformChannel` re-export from `lib/synheart_wear.dart`.
+
 ### Added
 
-- **Garmin Health SDK v4.7.0 integration** — bumped both iOS Companion XCFramework and Android Companion AAR to v4.7.0.
-- **Companion overlay workflow** — `make build-with-garmin` clones the private `synheart-wear-garmin-companion` repo into `.garmin/` and symlinks the licensed Dart adapter, models, and Android bridge over the open-source stubs. Stub-only builds remain fully supported (`make build-without-garmin`); RTS calls then throw `UnsupportedError`.
+- **Garmin Health SDK v4.7.0 wiring** — when used together with the licensed companion overlay, the plugin now targets both iOS Companion XCFramework and Android Companion AAR v4.7.0.
+- **Companion overlay workflow** — `make build-with-garmin` clones the private `synheart-wear-garmin-companion` repo into `.garmin/` and symlinks the licensed Dart adapter, models, and Android bridge over the open-source stubs **in your local checkout only** (`.garmin/` and the resulting symlinks are gitignored). Stub-only builds remain fully supported (`make build-without-garmin`); RTS calls then throw `UnsupportedError`.
 - **Local Maven repo for the Android AAR** — `android/repo/com/garmin/health/companion-sdk/4.7.0/` (POM committed, AAR gitignored). Resolves correctly when the plugin is consumed as a transitive Gradle library module.
-- **Public exports** — `lib/synheart_wear.dart` now re-exports `GarminPlatformChannel` and `HealthKitRRChannel` for advanced/native-channel callers.
 - **iOS framework wiring** — `ios/synheart_wear.podspec` now vendors `Frameworks/Companion.xcframework` with `-weak_framework Companion` by default; apps without the binary still launch.
 
 ### Changed
@@ -33,14 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `device.batteryLevel()` → `device.batteryPercentage()`
   - Per-type `enableRealTimeData` for graceful degradation on unsupported metrics
   - Removed `RealTimeHRV.beatToBeatIntervals` (dropped upstream)
-- **Garmin device manager** — calls `GarminPlatformChannel.isInitialized()` first and only invokes `initializeSDK` when needed, so a re-initialize from a screen that already owns the SDK no longer fails.
+- **Garmin device manager (companion repo)** — calls `GarminPlatformChannel.isInitialized()` first and only invokes `initializeSDK` when needed, so a re-initialize from a screen that already owns the SDK no longer fails.
 
 ### Documentation
 
 - Rewrote `GARMIN_SETUP.md` for SDK 4.7.0, the `.garmin/` companion repo overlay, and the `android/repo/` local Maven layout.
 - Refreshed `android/libs/README.md` (now legacy/`flatDir` only) and `ios/Frameworks/README.md` (podspec is wired by default).
-- Added the `android/repo/README.md` describing the licensed local Maven layout.
+- Added `android/repo/README.md` describing the licensed local Maven layout.
 - Top-level `README.md` now lists Garmin RTS as Ready (license required) and links to `GARMIN_SETUP.md`.
+- Removed stale `GarminProvider` / `WhoopProvider` "raw data for Flux" snippets from `README.md` (those classes are not present in this package).
 
 ## [0.3.1] - 2026-02-18
 
