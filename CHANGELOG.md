@@ -30,13 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `Device.rssi` removed from snapshot dict (no longer exposed by the SDK)
   - Per-type `startListening` so a device that doesn't support one metric (e.g. SpO2) doesn't fail the whole streaming session; falls back to the first paired device when no scan-derived `activeDevice` is available.
   - `scannedDevicesCache` is no longer cleared on `stopScanning` so `pairDevice` keeps working after the scan ends.
-- **Android wrapper (`GarminHealthSdkWrapper.kt`, in companion repo)** updated for Companion SDK 4.7.0 API changes:
+- **Android wrapper (`GarminHealthSdkWrapper.kt`, in companion repo — see [synheart-wear-garmin-companion#2](https://github.com/synheart-ai/synheart-wear-garmin-companion/pull/2), commit `cdd4c4f`)** updated for Companion SDK 4.7.0 API changes:
   - `addDevicePairedStateListener` / `removeDevicePairedStateListener` → `addPairedStateListener` / `removePairedStateListener`
+  - Implements `PairedStateListener` (was `DevicePairedStateListener`)
   - `device.unitId()` is now non-nullable (`Long`), no more `?.toInt()`
-  - `device.batteryLevel()` → `device.batteryPercentage()`
-  - Per-type `enableRealTimeData` for graceful degradation on unsupported metrics
+  - `device.batteryLevel()?.get()` (Future-based) → `device.batteryPercentage()` (synchronous Int)
+  - Per-type `enableRealTimeData` in a try/catch loop for graceful degradation on unsupported metrics (mirrors the iOS Swift bridge's per-type `startListening(for:)`)
   - Removed `RealTimeHRV.beatToBeatIntervals` (dropped upstream)
-- **Garmin device manager (companion repo)** — calls `GarminPlatformChannel.isInitialized()` first and only invokes `initializeSDK` when needed, so a re-initialize from a screen that already owns the SDK no longer fails.
+- **Garmin device manager (companion repo, same PR)** — calls `GarminPlatformChannel.isInitialized()` first and only invokes `initializeSDK` when needed, so a re-initialize from a screen that already owns the SDK no longer fails with `LICENSE_ALREADY_REGISTERED`.
 
 ### Documentation
 
