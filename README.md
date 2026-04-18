@@ -255,30 +255,11 @@ Add to `ios/Runner/Info.plist`:
 ## 🧠 Flux (HSI compute)
 
 This package **does not generate HSI** and **does not bundle Flux binaries**.
-**HSI is generated in Flux** (see the `synheart-flux` repo) and is typically orchestrated/validated in **Synheart Core**. 
+**HSI is generated in Flux** (see the `synheart-flux` repo) and is typically orchestrated/validated in **Synheart Core**.
 
-
-
-### Fetching Raw Data for Flux
-
-`WhoopProvider` exposes a `fetchRawDataForFlux()` method that fetches and formats vendor data for Flux processing:
-
-**WHOOP:**
-```dart
-final whoopProvider = WhoopProvider(appId: 'your-app-id', userId: 'user-123');
-final rawData = await whoopProvider.fetchRawDataForFlux(
-  start: DateTime.now().subtract(const Duration(days: 30)),
-  end: DateTime.now(),
-  limit: 50,
-);
-// Returns: { 'sleep': [...], 'recovery': [...], 'cycle': [...] }
-```
-
-This method automatically:
-- Fetches data from the appropriate vendor endpoints
-- Transforms data to match Flux's expected format
-- Handles missing fields and data validation
-- Returns data ready for Flux processing
+To feed Flux, read normalized metrics from this SDK (`SynheartWear.readMetrics()` /
+`streamHR()` / `streamHRV()`) and pass them to Flux through whatever ingestion
+path your Synheart Core deployment exposes.
 
 ## 📖 Additional Resources
 

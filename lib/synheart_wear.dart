@@ -123,9 +123,9 @@ export 'src/adapters/android_health_helper.dart';
 // Wear Service (REST) for historical data backfill
 export 'src/wear/wear_service_client.dart';
 
-// Garmin SDK adapter (public facade only)
+// Garmin SDK adapter (public facade only — full implementation is overlaid
+// from the private companion repo via `make build-with-garmin`).
 export 'src/adapters/garmin/garmin.dart';
-export 'src/adapters/garmin/garmin_platform_channel.dart';
 
 // Generic wearable device types
 export 'src/models/wearable_device.dart';
