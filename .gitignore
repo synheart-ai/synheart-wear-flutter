@@ -101,17 +101,14 @@ vendor/flux/
 # Garmin RTS companion (cloned at build time)
 .garmin/
 
-# Files that the companion overlay symlinks in at build time. These MUST stay
-# ignored so a careless `git add -A` after `make build-with-garmin` cannot
-# leak licensed code (or worse — absolute-path symlinks) into the open-source
-# tree. The two stubs that exist in this repo (`garmin_health.dart` and
-# `GarminSDKBridge.kt`) are explicitly re-included below.
-lib/src/adapters/garmin/garmin_*.dart
-!lib/src/adapters/garmin/garmin.dart
-!lib/src/adapters/garmin/garmin_health.dart
-lib/src/models/garmin_*.dart
-android/src/main/kotlin/ai/synheart/wear/garmin/Garmin*.kt
-!android/src/main/kotlin/ai/synheart/wear/garmin/GarminSDKBridge.kt
+# The companion overlay only replaces the licensed Kotlin native wrapper(s).
+# All Dart code (adapters + models) lives in this repo as regular OSS files.
+# We still must guard against the overlay leaking the Kotlin file as a symlink
+# pointing into `.garmin/` (which uses absolute developer paths). The
+# pre-commit hook + CI `make verify-clean` cover the runtime side; this rule
+# keeps any other companion-only Kotlin files (e.g. `GarminHealthSdkWrapper.kt`,
+# `GarminSdkWrapper.kt`) out of the index entirely.
+android/src/main/kotlin/ai/synheart/wear/garmin/Garmin*Wrapper.kt
 
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3

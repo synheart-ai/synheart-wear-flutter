@@ -12,7 +12,6 @@
 set -e
 
 PROTECTED_STUBS=(
-  "lib/src/adapters/garmin/garmin_health.dart"
   "android/src/main/kotlin/ai/synheart/wear/garmin/GarminSDKBridge.kt"
 )
 

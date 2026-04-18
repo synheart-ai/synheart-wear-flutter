@@ -33,3 +33,7 @@
 library garmin;
 
 export 'garmin_health.dart';
+export 'garmin_platform_channel.dart';
+export 'garmin_device_manager.dart';
+export 'garmin_sdk_adapter.dart';
+export 'garmin_errors.dart';

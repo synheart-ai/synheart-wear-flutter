@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (breaking only for downstream consumers that imported via `package:synheart_wear_garmin_companion/...`)
+
+- **Garmin Dart layer is now fully open-source.** The platform channel, device manager, SDK adapter, error types, and all Garmin data models (`GarminDevice`, `GarminConnectionState`, `GarminRealTimeData`, `GarminWellnessData`, `GarminSleepData`, `GarminActivityData`) used to live in the private `synheart-wear-garmin-companion` repo and were symlinked in by `make build-with-garmin`. None of them touch `com.garmin.health.*` — only the Kotlin wrapper does — so they now ship as regular tracked files in this repo. Consumers can `import 'package:synheart_wear/synheart_wear.dart'` and use `GarminPlatformChannel`, `GarminDeviceManager`, `GarminRealTimeData`, etc. without overlay access. In stub mode the Dart calls return `UNAVAILABLE` `PlatformException`s, surfaced as `GarminSDKError`.
+- **Companion overlay is now Kotlin-only.** `make build-with-garmin` only swaps `GarminSDKBridge.kt` for the licensed implementation and links the two `Garmin*Wrapper.kt` files (still gitignored). `lib/` is no longer touched at all.
+- **`.gitignore` and the pre-commit hook were shrunk accordingly** — only `Garmin*Wrapper.kt` is ignored; only `GarminSDKBridge.kt` is checked by the hook + `make verify-clean`.
+
 ### Fixed
 
 - **Stripped accidentally-committed Garmin companion symlinks** — PR #23 merged 14 symlinks pointing into `.garmin/` (the gitignored licensed companion overlay) onto `main`. The targets used absolute developer paths so the links were dangling for every other consumer and would have broken `pub publish`. Restored the original open-source stubs for `lib/src/adapters/garmin/garmin_health.dart` and `android/.../GarminSDKBridge.kt`, deleted the 12 spurious entries, and removed the now-invalid `GarminPlatformChannel` re-export from `lib/synheart_wear.dart`.
+- **Restored `GarminPlatformChannel` as a public export** — fixes downstream `Error: Undefined name 'GarminPlatformChannel'` (and friends) reported by `pulse_focus` after the symlink strip in PR #24. Now backed by a real, OSS implementation rather than a re-export of an overlay-only file.
 
 ### Added
 
