@@ -178,15 +178,36 @@ make build                  # auto-detect: with companion if accessible, otherwi
 make build-with-garmin      # explicit: requires companion repo access
 make build-without-garmin   # explicit: stub-only build (RTS calls throw UnsupportedError)
 make check-garmin           # verify your SSH access to the companion repo
-make clean-garmin           # remove .garmin/ and dangling symlinks
+make clean-garmin           # remove .garmin/, restore stubs from .stub backups
+make verify-clean           # CI-friendly: fail if overlay symlinks are in the tree
+make install-hooks          # configure git core.hooksPath → .githooks (idempotent)
 ```
 
 What `make build-with-garmin` does:
 
-1. `fetch-garmin` — shallow-clones the companion repo into `.garmin/` (or `git pull --ff-only` if already present)
-2. `link-garmin` — symlinks the licensed Dart, model, and Android-bridge files from `.garmin/dart/...` over the open-source stubs
+1. `install-hooks` — points `git config core.hooksPath` at `.githooks/` so the pre-commit guard is active.
+2. `fetch-garmin` — shallow-clones the companion repo into `.garmin/` (or `git pull --ff-only` if already present).
+3. `link-garmin` — backs up the two tracked stubs (`garmin_health.dart`, `GarminSDKBridge.kt`) to `.stub` files, then symlinks the licensed Dart, model, and Android-bridge files from `.garmin/dart/...` over the open-source tree.
 
-The `.garmin/` directory and all symlinks are listed in `.gitignore`, so they never get committed back to the open-source repo.
+`.garmin/` and the 12 overlay-only paths are gitignored. The two protected stubs **must** stay tracked, so they're guarded a different way (see below).
+
+### Overlay safety net
+
+Three layered defences keep the overlay from leaking into the open-source repo:
+
+1. **`.gitignore`** — the 12 overlay-only files (`garmin_*.dart` adapters/models, `GarminSdkWrapper.kt`, `GarminHealthSdkWrapper.kt`) are ignored, with explicit `!` exceptions for the two tracked stubs.
+2. **Pre-commit hook (`.githooks/pre-commit`)** — refuses any commit that stages either tracked stub as a symlink. Activated by `make install-hooks` (run once per clone — `make build*` does it for you).
+3. **CI check (`make verify-clean`)** — runs in the `garmin-overlay-guard` job on every PR/push and fails if the working tree has overlay symlinks at the protected paths.
+
+If you ever see the hook fire:
+
+```text
+✗ Refusing to commit: Garmin overlay symlinks detected in the index.
+    lib/src/adapters/garmin/garmin_health.dart
+      → /Volumes/.../.garmin/dart/lib/src/adapters/garmin/garmin_health.dart
+```
+
+…run `make clean-garmin` (which restores the stubs from `.stub` backups), re-stage your real changes, and try again. To get RTS back, just rerun `make build-with-garmin` afterwards.
 
 ---
 
