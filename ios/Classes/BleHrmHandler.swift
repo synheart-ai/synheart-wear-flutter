@@ -62,9 +62,20 @@ public class BleHrmHandler: NSObject {
             result(connectedPeripheral?.state == .connected)
         case "requestPermission":
             requestPermission(result: result)
+        case "warmAdapter":
+            warmAdapter(result: result)
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    // Instantiate CBCentralManager so subsequent BLE consumers (Garmin SDK)
+    // don't race the CoreBluetooth stack coming up.
+    private func warmAdapter(result: @escaping FlutterResult) {
+        if centralManager == nil {
+            centralManager = CBCentralManager(delegate: self, queue: nil)
+        }
+        result(nil)
     }
 
     // MARK: - Permission

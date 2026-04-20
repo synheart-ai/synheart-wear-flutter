@@ -148,3 +148,9 @@ export 'src/adapters/healthkit_rr_channel.dart';
 // BLE Heart Rate Monitor
 export 'src/adapters/ble_hrm_models.dart';
 export 'src/adapters/ble_hrm_bridge.dart';
+
+// Cloud vendor providers — vendor link flows (OAuth, credential storage,
+// deep-link callbacks) live here alongside the direct-device adapters.
+// Once linked, the Stream service consumes these handles for transport.
+export 'src/adapters/whoop/whoop_provider.dart';
+export 'src/adapters/garmin_health/garmin_provider.dart';

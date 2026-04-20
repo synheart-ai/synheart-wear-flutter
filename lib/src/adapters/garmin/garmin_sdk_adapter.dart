@@ -9,6 +9,7 @@ import '../../models/garmin_realtime_data.dart';
 import '../../models/garmin_wellness_data.dart';
 import '../../models/garmin_sleep_data.dart';
 import '../../models/garmin_activity_data.dart';
+import '../ble_hrm_bridge.dart';
 import '../wear_adapter.dart';
 import 'garmin_device_manager.dart';
 import 'garmin_errors.dart';
@@ -85,6 +86,13 @@ class GarminAdapter implements WearAdapter {
     if (_initialized) return;
 
     try {
+      // Warm the native BLE stack — Garmin SDK can report "no supported
+      // real-time types" if it runs before CoreBluetooth/BluetoothAdapter
+      // has been touched by anything else in the process.
+      await BleHrmProvider()
+          .warmAdapter()
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+
       await _deviceManager.initialize();
       _initialized = true;
       logInfo('GarminAdapter initialized successfully');

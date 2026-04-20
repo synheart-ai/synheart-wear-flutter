@@ -74,6 +74,12 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             "disconnect" -> disconnect(result)
             "isConnected" -> result.success(connectedGatt != null)
             "getBondedHrDevices" -> getBondedHrDevices(result)
+            "warmAdapter" -> {
+                // Touching the adapter forces the BLUETOOTH_SERVICE binder up so
+                // the Garmin SDK doesn't race a cold stack on first use.
+                bluetoothAdapter
+                result.success(null)
+            }
             else -> result.notImplemented()
         }
     }

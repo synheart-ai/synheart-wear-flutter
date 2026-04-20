@@ -110,6 +110,12 @@ vendor/flux/
 # `GarminSdkWrapper.kt`) out of the index entirely.
 android/src/main/kotlin/ai/synheart/wear/garmin/Garmin*Wrapper.kt
 
+# `make link-garmin` saves the tracked OSS stub to `<path>.stub` before
+# replacing it with a symlink, then `make clean-garmin` restores from the
+# backup. The backup is purely a developer-machine artifact and must never be
+# staged — `git add -A` would otherwise pick it up as a new file.
+**/*.kt.stub
+
 # Exceptions to above rules.
 !**/ios/**/default.mode1v3
 !**/ios/**/default.mode2v3

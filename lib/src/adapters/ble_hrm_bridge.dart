@@ -35,6 +35,17 @@ class BleHrmProvider {
     }
   }
 
+  /// Instantiate the native BLE central without requesting permission or
+  /// scanning. Prevents the Garmin SDK's "No supported real-time types"
+  /// failure when it runs before anything else has touched CoreBluetooth.
+  Future<void> warmAdapter() async {
+    try {
+      await _method.invokeMethod<void>('warmAdapter');
+    } on PlatformException {
+      // Best effort — callers treat failure as non-fatal.
+    }
+  }
+
   /// Scan for nearby BLE heart rate monitor devices.
   ///
   /// [timeoutMs] — scan duration in milliseconds (default 5000).
