@@ -190,6 +190,24 @@ public class GarminSDKBridge: NSObject {
                 DeviceManager.shared.add(connectionDelegate: self)
                 DeviceManager.shared.add(syncDelegate: self)
 
+                // Seed Flutter with the current connection state of every
+                // already-paired device. The SDK auto-reconnects during
+                // ConfigurationManager.start(...) and didConnect has usually
+                // already fired by the time we reach this point — without
+                // this replay, Flutter's first view of the world is empty
+                // and "Connected Wearables" reports disconnected until a
+                // new didConnect happens to fire.
+                if let paired = try? DeviceManager.shared.getPairedDevices() {
+                    for device in paired {
+                        let state = device.isConnected ? "connected" : "disconnected"
+                        self.connectionStateHandler?.sendConnectionState(
+                            state,
+                            deviceId: Int(device.unitID ?? 0),
+                            error: nil
+                        )
+                    }
+                }
+
                 await MainActor.run {
                     self.isSDKInitialized = true
                     result(true)
@@ -511,6 +529,7 @@ public class GarminSDKBridge: NSObject {
         #if canImport(Companion)
         let args = call.arguments as? [String: Any]
         let dataTypeStrings = args?["dataTypes"] as? [String]
+        let requestedUnitId = args?["deviceId"] as? Int
 
         // Default to all supported real-time types
         var realTimeTypes: RealTimeTypes = [
@@ -534,8 +553,14 @@ public class GarminSDKBridge: NSObject {
             }
         }
 
-        // If no active device, try to use first paired device
-        if activeDevice == nil {
+        // Resolve target device. Honor the deviceId (unitID) arg when Dart
+        // passes one so the user's preferred device is used instead of
+        // silently defaulting to paired.first — flagged in Garmin review.
+        if let unitId = requestedUnitId,
+           let paired = try? DeviceManager.shared.getPairedDevices(),
+           let match = paired.first(where: { $0.unitID == UInt32(unitId) }) {
+            activeDevice = match
+        } else if activeDevice == nil {
             if let paired = try? DeviceManager.shared.getPairedDevices(),
                let first = paired.first {
                 activeDevice = first
@@ -906,13 +931,35 @@ extension GarminSDKBridge: @preconcurrency RealTimeDelegate {
 class GarminConnectionStateHandler: NSObject, FlutterStreamHandler {
     private var eventSink: FlutterEventSink?
 
+    // Per-device last-known state. The Garmin SDK auto-reconnects paired
+    // devices during initialize() and fires didConnect before Flutter has
+    // subscribed to the event channel, which means the first "connected"
+    // event was being silently dropped and the UI stayed on "disconnected"
+    // until the watch physically re-paired. Caching lets us replay the
+    // latest state for every known device the moment Flutter attaches.
+    private var lastStateByDevice: [Int: [String: Any]] = [:]
+    private var lastStateOrder: [Int] = []
+    // Bounded buffer for events without a deviceId (e.g. service-level
+    // failures) so a chatty signal can't grow unbounded while unlistened.
+    private var anonymousEvents: [[String: Any]] = []
+    private let anonymousCap = 16
+    private let queue = DispatchQueue(label: "ai.synheart.wear.garmin.connstate")
+
     func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.eventSink = events
+        queue.sync {
+            self.eventSink = events
+            let ordered = lastStateOrder.compactMap { lastStateByDevice[$0] }
+            let anon = anonymousEvents
+            DispatchQueue.main.async {
+                ordered.forEach { events($0) }
+                anon.forEach { events($0) }
+            }
+        }
         return nil
     }
 
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSink = nil
+        queue.sync { eventSink = nil }
         return nil
     }
 
@@ -925,7 +972,21 @@ class GarminConnectionStateHandler: NSObject, FlutterStreamHandler {
             data["error"] = error
         }
         data["timestamp"] = Int64(Date().timeIntervalSince1970 * 1000)
-        eventSink?(data)
+        queue.sync {
+            if let deviceId = deviceId {
+                if lastStateByDevice[deviceId] == nil {
+                    lastStateOrder.append(deviceId)
+                }
+                lastStateByDevice[deviceId] = data
+            } else {
+                anonymousEvents.append(data)
+                if anonymousEvents.count > anonymousCap {
+                    anonymousEvents.removeFirst(anonymousEvents.count - anonymousCap)
+                }
+            }
+            let sink = eventSink
+            DispatchQueue.main.async { sink?(data) }
+        }
     }
 }
 

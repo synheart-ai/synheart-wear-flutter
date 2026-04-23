@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:synheart_wear/src/adapters/ble_hrm_models.dart';
+import 'package:synheart_wear/src/core/logger.dart';
 
 /// Platform bridge for BLE Heart Rate Monitor operations.
 ///
@@ -93,6 +94,7 @@ class BleHrmProvider {
     String? sessionId,
     bool enableBattery = false,
   }) async {
+    logInfo('[BLE] connecting deviceId=$deviceId session=$sessionId');
     try {
       await _method.invokeMethod<void>('connect', {
         'deviceId': deviceId,
@@ -100,8 +102,12 @@ class BleHrmProvider {
         'enableBattery': enableBattery,
       });
       _ensureListening();
+      logInfo('[BLE] connected deviceId=$deviceId');
     } on PlatformException catch (e) {
-      throw _mapError(e);
+      final mapped = _mapError(e);
+      logError('[BLE] connect failed deviceId=$deviceId: ${mapped.message}',
+          mapped);
+      throw mapped;
     }
   }
 
@@ -109,6 +115,7 @@ class BleHrmProvider {
   Future<void> disconnect() async {
     try {
       await _method.invokeMethod<void>('disconnect');
+      logInfo('[BLE] disconnected');
     } on PlatformException catch (e) {
       throw _mapError(e);
     }
@@ -140,11 +147,10 @@ class BleHrmProvider {
         }
       },
       onError: (Object error) {
-        if (error is PlatformException) {
-          _hrController.addError(_mapError(error));
-        } else {
-          _hrController.addError(error);
-        }
+        final mapped =
+            error is PlatformException ? _mapError(error) : error;
+        logError('[BLE] stream error: $mapped', mapped);
+        _hrController.addError(mapped);
       },
     );
   }

@@ -331,12 +331,22 @@ class GarminAdapter implements WearAdapter {
     Set<GarminRealTimeType>? dataTypes,
   }) async {
     _ensureInitialized();
-    await _deviceManager.startStreaming(device: device, dataTypes: dataTypes);
+    final target = device?.name ?? 'active device';
+    logInfo('[Garmin] startStreaming target=$target '
+        'types=${dataTypes?.map((t) => t.name).join(",") ?? "all"}');
+    try {
+      await _deviceManager.startStreaming(device: device, dataTypes: dataTypes);
+      logInfo('[Garmin] startStreaming OK target=$target');
+    } catch (e) {
+      logError('[Garmin] startStreaming FAILED target=$target', e);
+      rethrow;
+    }
   }
 
   /// Stop real-time streaming
   Future<void> stopStreaming({GarminDevice? device}) async {
     await _deviceManager.stopStreaming(device: device);
+    logInfo('[Garmin] stopStreaming target=${device?.name ?? "active"}');
   }
 
   /// Convert real-time data to WearMetrics
