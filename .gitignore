@@ -100,6 +100,13 @@ vendor/flux/
 
 # Garmin RTS companion (cloned at build time)
 .garmin/
+# Also block any ad-hoc archive of the companion (e.g. a Finder-created
+# `.garmin.zip`) that would otherwise ship the licensed overlay as a single
+# blob if it ever hit `git add -A`.
+.garmin.zip
+.garmin.tar
+.garmin.tar.gz
+.garmin.tgz
 
 # The companion overlay only replaces the licensed Kotlin native wrapper(s).
 # All Dart code (adapters + models) lives in this repo as regular OSS files.
