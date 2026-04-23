@@ -12,7 +12,7 @@ PODS:
   - shared_preferences_foundation (0.0.1):
     - Flutter
     - FlutterMacOS
-  - synheart_wear (0.2.0):
+  - synheart_wear (0.3.1):
     - Flutter
   - url_launcher_ios (0.0.1):
     - Flutter
@@ -52,7 +52,7 @@ SPEC CHECKSUMS:
   health: 4decf5d74e8f54c58a8c07a385fc72f629a831d9
   path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
-  synheart_wear: 11d42f8d6887ef4069381dffde3d7781c5dc8c6f
+  synheart_wear: fafc430684147f8f7266b91f9b9fafbd8f9fbe25
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: bd29822c3d5baf6b44b726f00ea3293a19339ef2

@@ -11,7 +11,11 @@ and optional Garmin Companion SDK integration.
   s.author           = { 'Synheart' => 'opensource@synheart.ai' }
   s.source           = { :path => '.' }
 
-  s.source_files = 'Classes/**/*'
+  # Only Swift/Obj-C sources — markdown READMEs inside `Classes/Garmin/Impl/`
+  # (the gitignored overlay target dir) would otherwise be dragged into the
+  # Copy Resources phase and emit "no rule to process file" warnings for
+  # every build.
+  s.source_files = 'Classes/**/*.{swift,h,m}'
   s.dependency 'Flutter'
   s.platform = :ios, '16.0'
   s.swift_version = '5.10'
