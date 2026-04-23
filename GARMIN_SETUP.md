@@ -6,20 +6,28 @@ This guide explains how to integrate the Garmin Health SDK with `synheart_wear` 
 
 ## Architecture overview
 
-Only the **native Kotlin wrapper** that calls `com.garmin.health.*` actually requires the Garmin licence. Everything else — the Dart facade, the platform-channel scaffolding, all data models, the iOS Swift bridge — is open-source and ships in this repo by default. The companion overlay only swaps in two Kotlin files at build time:
+Only the **native code that textually references Garmin SDK symbols** actually requires the Garmin licence. Everything else — the Dart facade, the platform-channel scaffolding, all data models, the iOS Swift stub, the iOS pure-Swift channel handlers, and the Android bridge stub — is open-source and ships in this repo by default. The companion overlay swaps in the Kotlin wrapper(s) and the Swift impl at build time:
 
 | Layer                              | Where it lives                                                              | Licensed? |
 | ---------------------------------- | --------------------------------------------------------------------------- | --------- |
 | `GarminHealth` Dart facade         | `lib/src/adapters/garmin/garmin_health.dart`                                | No (OSS)  |
 | Platform channel + device manager  | `lib/src/adapters/garmin/garmin_platform_channel.dart`, `garmin_device_manager.dart`, `garmin_sdk_adapter.dart`, `garmin_errors.dart` | No (OSS)  |
 | Garmin data models                 | `lib/src/models/garmin_*.dart`                                              | No (OSS)  |
-| iOS native bridge                  | `ios/Classes/Garmin/GarminSDKBridge.swift`                                  | No (OSS, weak-linked against `Companion.xcframework`) |
+| iOS Swift stub bridge              | `ios/Classes/Garmin/GarminSDKBridge.swift` — zero Garmin SDK symbols; registers Flutter channels and looks up the impl at runtime via `NSClassFromString("GarminSDKBridgeImpl")` | No (OSS)  |
+| iOS pure-Swift channel handlers    | `ios/Classes/Garmin/GarminChannelHandlers.swift` — four `FlutterStreamHandler`s (connection state, scanned devices, real-time data, sync progress). No SDK dependency. | No (OSS)  |
 | Android native bridge stub         | `android/.../GarminSDKBridge.kt`                                            | No (OSS — returns `UNAVAILABLE` until overlay runs)   |
 | **Android licensed wrapper**       | `android/.../GarminHealthSdkWrapper.kt`, `android/.../GarminSdkWrapper.kt` (gitignored) | **Yes — companion repo** |
+| **iOS licensed impl**              | `ios/Classes/Garmin/Impl/GarminSDKBridgeImpl.swift` (gitignored)            | **Yes — companion repo** |
 
-`make link-garmin` (a) backs `GarminSDKBridge.kt` up to `GarminSDKBridge.kt.stub`, (b) symlinks the licensed version from `.garmin/` over it, and (c) symlinks the two `Garmin*Wrapper.kt` files into the gitignored slot beside it. `.garmin/` is gitignored, so the symlinked files never end up in the open-source tree.
+`make link-garmin` performs three overlay operations:
 
-In stub mode (no overlay): every Garmin Dart call still compiles cleanly and uses the same data classes, but the platform channel returns `UNAVAILABLE` `PlatformException`s which the Dart layer surfaces as `GarminSDKError`. Non-Garmin adapters are unaffected.
+- **Android protected stub** — backs `GarminSDKBridge.kt` up to `GarminSDKBridge.kt.stub`, then symlinks the licensed version from `.garmin/` over it.
+- **Android licensed wrappers** — symlinks `GarminSdkWrapper.kt` / `GarminHealthSdkWrapper.kt` into the gitignored slot beside the bridge.
+- **iOS licensed impl** — symlinks `GarminSDKBridgeImpl.swift` into the gitignored `ios/Classes/Garmin/Impl/` directory.
+
+`.garmin/`, `Garmin*Wrapper.kt`, and `ios/Classes/Garmin/Impl/*.swift` are all gitignored, so the symlinked files never end up in the open-source tree. Because the iOS Impl path is fully gitignored (no tracked stub to protect), it doesn't need the same pre-commit guard that the Android bridge uses.
+
+In stub mode (no overlay): every Garmin Dart call still compiles cleanly and uses the same data classes, but the platform channel returns `UNAVAILABLE` `PlatformException`s which the Dart layer surfaces as `GarminSDKError`. On iOS the stub bridge's runtime `NSClassFromString` lookup returns `nil` and every method returns `UNAVAILABLE`. Non-Garmin adapters are unaffected.
 
 ---
 
@@ -98,7 +106,7 @@ Use this if you're integrating Garmin in your app **directly** (not through this
    cd ios && pod deintegrate && pod install
    ```
 
-> **Note** — the iOS Companion SDK 4.x renamed several APIs (`heartRateVariability` → `beatToBeatInterval`, `spo2` → `oxygenLevel`, `respirationRate` → `breathsPerMinute`, `bodyBattery` → `bodyBatteryLevel`, `accelerometer.x/y/z` → `xValue/yValue/zValue`, sync direction `.download` → `.toPhone`, `DeviceType.all` → `DeviceType.allKnown`). Our `GarminSDKBridge.swift` is already updated for these. If you bump the SDK further, re-check those mappings.
+> **Note** — the iOS Companion SDK 4.x renamed several APIs (`heartRateVariability` → `beatToBeatInterval`, `spo2` → `oxygenLevel`, `respirationRate` → `breathsPerMinute`, `bodyBattery` → `bodyBatteryLevel`, `accelerometer.x/y/z` → `xValue/yValue/zValue`, sync direction `.download` → `.toPhone`, `DeviceType.all` → `DeviceType.allKnown`). These mappings live in the licensed companion impl (`GarminSDKBridgeImpl.swift` in the `synheart-wear-garmin-companion` repo, overlaid into `ios/Classes/Garmin/Impl/` by `make link-garmin`). The OSS stub (`GarminSDKBridge.swift`) has no SDK symbol references to keep in sync. If you bump the SDK further, re-check those mappings in the companion repo.
 
 ---
 
@@ -190,17 +198,22 @@ What `make build-with-garmin` does:
 
 1. `install-hooks` — points `git config core.hooksPath` at `.githooks/` so the pre-commit guard is active.
 2. `fetch-garmin` — shallow-clones the companion repo into `.garmin/` (or `git pull --ff-only` if already present).
-3. `link-garmin` — backs up the tracked `GarminSDKBridge.kt` stub to `.stub`, symlinks the licensed Kotlin bridge over it, and symlinks the two companion-only Kotlin wrappers (`GarminSdkWrapper.kt`, `GarminHealthSdkWrapper.kt`) into the gitignored slot beside it.
+3. `link-garmin` performs three overlays:
+   - **Android bridge** — backs the tracked `GarminSDKBridge.kt` stub up to `.stub`, symlinks the licensed Kotlin bridge over it.
+   - **Android wrappers** — symlinks the two companion-only Kotlin wrappers (`GarminSdkWrapper.kt`, `GarminHealthSdkWrapper.kt`) into the gitignored slot beside the bridge.
+   - **iOS impl** — symlinks `GarminSDKBridgeImpl.swift` into the gitignored `ios/Classes/Garmin/Impl/` directory. If the companion clone predates the iOS overlay (i.e. the file isn't present in `.garmin/`), link-garmin logs a skip notice and Android-only stays functional.
 
-`.garmin/` and `Garmin*Wrapper.kt` are gitignored. `GarminSDKBridge.kt` **must** stay tracked, so it's guarded a different way (see below). All Dart code is plain OSS — the overlay no longer touches `lib/`.
+`.garmin/`, `Garmin*Wrapper.kt`, and `ios/Classes/Garmin/Impl/*.swift` are gitignored. `GarminSDKBridge.kt` **must** stay tracked (otherwise `pub publish` breaks for stub-mode consumers), so it's guarded a different way (see below). On iOS, `GarminSDKBridge.swift` is a pure-Swift stub with zero SDK symbol references — the licensed impl drops into the separate, gitignored `Impl/` directory, so no pre-commit guard is required for the iOS path. All Dart code is plain OSS — the overlay no longer touches `lib/`.
 
 ### Overlay safety net
 
-Three layered defences keep the overlay from leaking into the open-source repo:
+Three layered defences keep the Android overlay from leaking into the open-source repo:
 
-1. **`.gitignore`** — `Garmin*Wrapper.kt` is ignored so the two licensed Kotlin wrappers can never be staged.
+1. **`.gitignore`** — `Garmin*Wrapper.kt` is ignored so the two licensed Kotlin wrappers can never be staged. `ios/Classes/Garmin/Impl/*.swift` is ignored so the iOS licensed impl can never be staged either.
 2. **Pre-commit hook (`.githooks/pre-commit`)** — refuses any commit that stages `GarminSDKBridge.kt` as a symlink. Activated by `make install-hooks` (run once per clone — `make build*` does it for you).
-3. **CI check (`make verify-clean`)** — runs in the `garmin-overlay-guard` job on every PR/push and fails if the working tree has the overlay symlink at the protected path.
+3. **CI check (`make verify-clean`)** — runs in the `garmin-overlay-guard` job on every PR/push and fails if the working tree has the overlay symlink at the protected Android path.
+
+The iOS `Impl/` path has no tracked stub, so a hook is not needed — the `.gitignore` rule alone makes `git add` a no-op for any symlink placed there.
 
 If you ever see the hook fire:
 
@@ -335,22 +348,31 @@ After a full setup with companion access, the package looks like:
 
 ```
 synheart_wear/
-├── .garmin/                                              # ← cloned by `make fetch-garmin` (gitignored)
-│   ├── dart/lib/src/adapters/garmin/*.dart               # ← real Garmin adapter sources
-│   ├── dart/lib/src/models/garmin_*.dart                 # ← real Garmin data models
-│   └── dart/android/.../GarminSDKBridge.kt + wrappers    # ← real Android bridge
+├── .garmin/                                                        # ← cloned by `make fetch-garmin` (gitignored)
+│   └── dart/
+│       ├── android/.../GarminSDKBridge.kt + wrappers               # ← real Android bridge + wrappers
+│       └── ios/Classes/Garmin/GarminSDKBridgeImpl.swift            # ← real iOS Swift impl
 ├── android/
-│   ├── build.gradle                                      # ← wired for SDK 4.7.0
-│   └── repo/com/garmin/health/companion-sdk/4.7.0/
-│       ├── companion-sdk-4.7.0.pom                       # committed
-│       └── companion-sdk-4.7.0.aar                       # ← drop in licensed AAR (gitignored)
+│   ├── build.gradle                                                # ← wired for SDK 4.7.0
+│   ├── repo/com/garmin/health/companion-sdk/4.7.0/
+│   │   ├── companion-sdk-4.7.0.pom                                 # committed
+│   │   └── companion-sdk-4.7.0.aar                                 # ← drop in licensed AAR (gitignored)
+│   └── src/main/kotlin/ai/synheart/wear/garmin/
+│       ├── GarminSDKBridge.kt                                      # tracked stub; symlinked to .garmin/ after overlay
+│       ├── GarminSDKBridge.kt.stub                                 # backup created by link-garmin (auto-deleted on clean)
+│       ├── GarminSdkWrapper.kt                                     # symlink into .garmin/ after overlay (gitignored)
+│       └── GarminHealthSdkWrapper.kt                               # symlink into .garmin/ after overlay (gitignored)
 ├── ios/
-│   ├── synheart_wear.podspec                             # ← wired for Companion.xcframework
+│   ├── synheart_wear.podspec                                       # ← wired for Companion.xcframework
 │   ├── Frameworks/
-│   │   └── Companion.xcframework/                        # ← drop in licensed framework (gitignored)
-│   └── Classes/Garmin/GarminSDKBridge.swift              # in-tree, conditionally compiled
-├── lib/src/adapters/garmin/                              # symlinks into `.garmin/` after overlay
-└── lib/src/models/                                       # symlinks into `.garmin/` after overlay
+│   │   └── Companion.xcframework/                                  # ← drop in licensed framework (gitignored)
+│   └── Classes/Garmin/
+│       ├── GarminSDKBridge.swift                                   # tracked OSS stub — zero Garmin SDK symbols
+│       ├── GarminChannelHandlers.swift                             # tracked OSS — pure-Swift FlutterStreamHandlers
+│       └── Impl/
+│           ├── README.md                                           # tracked — describes the overlay slot
+│           └── GarminSDKBridgeImpl.swift                           # symlink into .garmin/ after overlay (gitignored)
+└── lib/                                                             # all Dart lives here as regular tracked files (no overlay)
 ```
 
 ---

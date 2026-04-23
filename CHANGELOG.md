@@ -10,8 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed (breaking only for downstream consumers that imported via `package:synheart_wear_garmin_companion/...`)
 
 - **Garmin Dart layer is now fully open-source.** The platform channel, device manager, SDK adapter, error types, and all Garmin data models (`GarminDevice`, `GarminConnectionState`, `GarminRealTimeData`, `GarminWellnessData`, `GarminSleepData`, `GarminActivityData`) used to live in the private `synheart-wear-garmin-companion` repo and were symlinked in by `make build-with-garmin`. None of them touch `com.garmin.health.*` — only the Kotlin wrapper does — so they now ship as regular tracked files in this repo. Consumers can `import 'package:synheart_wear/synheart_wear.dart'` and use `GarminPlatformChannel`, `GarminDeviceManager`, `GarminRealTimeData`, etc. without overlay access. In stub mode the Dart calls return `UNAVAILABLE` `PlatformException`s, surfaced as `GarminSDKError`.
-- **Companion overlay is now Kotlin-only.** `make build-with-garmin` only swaps `GarminSDKBridge.kt` for the licensed implementation and links the two `Garmin*Wrapper.kt` files (still gitignored). `lib/` is no longer touched at all.
-- **`.gitignore` and the pre-commit hook were shrunk accordingly** — only `Garmin*Wrapper.kt` is ignored; only `GarminSDKBridge.kt` is checked by the hook + `make verify-clean`.
+- **Companion overlay now covers Android Kotlin + iOS Swift.** `make build-with-garmin` swaps `GarminSDKBridge.kt` for the licensed implementation, links the two `Garmin*Wrapper.kt` files, and symlinks `GarminSDKBridgeImpl.swift` into the new gitignored `ios/Classes/Garmin/Impl/` slot. `lib/` is no longer touched at all.
+- **iOS bridge split to remove Garmin SDK exposure from OSS.** The old 1052-line `ios/Classes/Garmin/GarminSDKBridge.swift` contained `#if canImport(Companion)` branches that textually referenced Garmin SDK types (`DeviceManager`, `ConfigurationManager`, `RealTimeTypes`, `ScannedDevice`, delegate protocols, etc.), which was incompatible with keeping the plugin truly open-source. It's now a 132-line stub that registers Flutter channels, owns the stream handlers, and looks the licensed impl up at runtime via `NSClassFromString("GarminSDKBridgeImpl")`. Pure-Swift `FlutterStreamHandler`s (including the `lastStateByDevice` replay cache) moved into a new `GarminChannelHandlers.swift`. The full SDK-calling implementation moved into the companion repo at `dart/ios/Classes/Garmin/GarminSDKBridgeImpl.swift`, overlaid into OSS at build time via `make link-garmin`. On OSS-only builds every Garmin method returns `UNAVAILABLE`. Verified end-to-end: the plugin pod compiles cleanly in both configurations (`BUILD SUCCEEDED` with and without the overlay).
+- **`.gitignore` and the pre-commit hook were shrunk accordingly** — only `Garmin*Wrapper.kt` and `ios/Classes/Garmin/Impl/*.swift` are ignored; only `GarminSDKBridge.kt` is checked by the hook + `make verify-clean` (iOS uses gitignore alone because there's no tracked stub at the overlay path).
+- **Podspec glob narrowed** — `s.source_files = 'Classes/**/*'` → `'Classes/**/*.{swift,h,m}'` so the new `Classes/Garmin/Impl/README.md` doesn't trigger "no rule to process file" warnings on every iOS build.
 
 ### Fixed
 
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **iOS bridge (`GarminSDKBridge.swift`)** updated for Companion SDK 4.x API changes:
+- **iOS licensed impl (`GarminSDKBridgeImpl.swift`, in companion repo at `dart/ios/Classes/Garmin/`)** updated for Companion SDK 4.x API changes. These now live in the licensed overlay — the OSS `GarminSDKBridge.swift` no longer references the Garmin SDK at all.
   - `DeviceType.all` → `DeviceType.allKnown` (and name-based string matching for the now-100+ device-type cases)
   - `RealTimeTypes.heartRateVariability` → `.beatToBeatInterval`
   - `RealTimeResults.spo2` → `.oxygenLevel`, `.respirationRate` → `.breathsPerMinute`, `.bodyBattery` → `.bodyBatteryLevel`
