@@ -1,16 +1,39 @@
 import Flutter
 import Foundation
 
-// Conditionally import Companion SDK if available
-#if canImport(Companion)
-import Companion
-private let isGarminSDKAvailable = true
-#else
-private let isGarminSDKAvailable = false
-#endif
+/// Protocol the companion-repo overlay class conforms to.
+///
+/// The real implementation lives in `synheart-wear-garmin-companion` and is
+/// symlinked into `ios/Classes/Garmin/Impl/GarminSDKBridgeImpl.swift` at build
+/// time via `make link-garmin`. That overlay class imports the licensed
+/// Garmin Companion SDK; this open-source tree has zero textual reference to
+/// any Garmin SDK symbol.
+///
+/// The overlay class is discovered at runtime via `NSClassFromString` so OSS
+/// doesn't even mention `GarminSDKBridgeImpl` by type — the string below is
+/// the only coupling.
+@objc public protocol GarminSDKBridgeImplProtocol: AnyObject {
+    init()
+    func configure(
+        connectionStateHandler: GarminConnectionStateHandler,
+        scannedDevicesHandler: GarminScannedDevicesHandler,
+        realTimeDataHandler: GarminRealTimeDataHandler,
+        syncProgressHandler: GarminSyncProgressHandler
+    )
+    func handle(call: FlutterMethodCall, result: @escaping FlutterResult)
+}
 
-/// Main bridge class for Garmin SDK integration on iOS
-/// Note: Actual GarminSDK framework must be linked separately
+/// Public entry point for the Garmin method/event channels.
+///
+/// This class is a thin shell — it registers the Flutter channels, owns the
+/// four pure-Swift event-channel handlers, and dispatches method calls to an
+/// overlay implementation if one is present at runtime. Without the overlay
+/// every method returns `UNAVAILABLE` (matching the Android stub behaviour).
+///
+/// ZERO Garmin SDK symbols are referenced here. To enable real-time streaming
+/// the developer runs `make link-garmin`, which drops
+/// `GarminSDKBridgeImpl.swift` into `ios/Classes/Garmin/Impl/` as a symlink
+/// into the licensed companion repo (`synheart-wear-garmin-companion`).
 public class GarminSDKBridge: NSObject {
     private var methodChannel: FlutterMethodChannel?
     private var connectionStateChannel: FlutterEventChannel?
@@ -18,58 +41,48 @@ public class GarminSDKBridge: NSObject {
     private var realTimeDataChannel: FlutterEventChannel?
     private var syncProgressChannel: FlutterEventChannel?
 
-    private var connectionStateHandler: GarminConnectionStateHandler?
-    private var scannedDevicesHandler: GarminScannedDevicesHandler?
-    private var realTimeDataHandler: GarminRealTimeDataHandler?
-    private var syncProgressHandler: GarminSyncProgressHandler?
+    private let connectionStateHandler = GarminConnectionStateHandler()
+    private let scannedDevicesHandler = GarminScannedDevicesHandler()
+    private let realTimeDataHandler = GarminRealTimeDataHandler()
+    private let syncProgressHandler = GarminSyncProgressHandler()
 
-    private var isSDKInitialized = false
-    private var licenseKey: String?
-
-    #if canImport(Companion)
-    private var activeDevice: Device?
-    private var scannedDevicesCache: [ScannedDevice] = []
-    #endif
+    /// Optional impl supplied by the overlay. `nil` in OSS builds; populated
+    /// when `GarminSDKBridgeImpl` is present in the compiled target.
+    private var impl: GarminSDKBridgeImplProtocol?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let instance = GarminSDKBridge()
         instance.setupChannels(registrar: registrar)
+        instance.attachImplIfAvailable()
     }
 
     private func setupChannels(registrar: FlutterPluginRegistrar) {
-        // Method channel
         methodChannel = FlutterMethodChannel(
             name: "synheart_wear/garmin_sdk",
             binaryMessenger: registrar.messenger()
         )
-        methodChannel?.setMethodCallHandler(handle)
+        methodChannel?.setMethodCallHandler { [weak self] call, result in
+            self?.handle(call, result: result)
+        }
 
-        // Connection state event channel
-        connectionStateHandler = GarminConnectionStateHandler()
         connectionStateChannel = FlutterEventChannel(
             name: "synheart_wear/garmin_sdk/connection_state",
             binaryMessenger: registrar.messenger()
         )
         connectionStateChannel?.setStreamHandler(connectionStateHandler)
 
-        // Scanned devices event channel
-        scannedDevicesHandler = GarminScannedDevicesHandler()
         scannedDevicesChannel = FlutterEventChannel(
             name: "synheart_wear/garmin_sdk/scanned_devices",
             binaryMessenger: registrar.messenger()
         )
         scannedDevicesChannel?.setStreamHandler(scannedDevicesHandler)
 
-        // Real-time data event channel
-        realTimeDataHandler = GarminRealTimeDataHandler()
         realTimeDataChannel = FlutterEventChannel(
             name: "synheart_wear/garmin_sdk/real_time_data",
             binaryMessenger: registrar.messenger()
         )
         realTimeDataChannel?.setStreamHandler(realTimeDataHandler)
 
-        // Sync progress event channel
-        syncProgressHandler = GarminSyncProgressHandler()
         syncProgressChannel = FlutterEventChannel(
             name: "synheart_wear/garmin_sdk/sync_progress",
             binaryMessenger: registrar.messenger()
@@ -77,976 +90,42 @@ public class GarminSDKBridge: NSObject {
         syncProgressChannel?.setStreamHandler(syncProgressHandler)
     }
 
+    /// Runtime-only lookup: no textual mention of the overlay class name
+    /// beyond this single string. If the overlay isn't linked in, every
+    /// method call falls through to the `UNAVAILABLE` branch below.
+    private func attachImplIfAvailable() {
+        guard
+            let implClass = NSClassFromString("GarminSDKBridgeImpl") as? NSObject.Type,
+            let candidate = implClass.init() as? GarminSDKBridgeImplProtocol
+        else {
+            return
+        }
+        candidate.configure(
+            connectionStateHandler: connectionStateHandler,
+            scannedDevicesHandler: scannedDevicesHandler,
+            realTimeDataHandler: realTimeDataHandler,
+            syncProgressHandler: syncProgressHandler
+        )
+        impl = candidate
+    }
+
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        if let impl = impl {
+            impl.handle(call: call, result: result)
+            return
+        }
+
         switch call.method {
         case "isAvailable":
-            handleIsAvailable(result: result)
-
-        case "initializeSDK":
-            handleInitializeSDK(call: call, result: result)
-
+            result(false)
         case "isInitialized":
-            result(isSDKInitialized)
-
-        case "startScanning":
-            handleStartScanning(call: call, result: result)
-
-        case "stopScanning":
-            handleStopScanning(result: result)
-
-        case "pairDevice":
-            handlePairDevice(call: call, result: result)
-
-        case "cancelPairing":
-            handleCancelPairing(result: result)
-
-        case "forgetDevice":
-            handleForgetDevice(call: call, result: result)
-
-        case "getPairedDevices":
-            handleGetPairedDevices(result: result)
-
-        case "getConnectionState":
-            handleGetConnectionState(call: call, result: result)
-
-        case "requestSync":
-            handleRequestSync(call: call, result: result)
-
-        case "getBatteryLevel":
-            handleGetBatteryLevel(call: call, result: result)
-
-        case "startStreaming":
-            handleStartStreaming(call: call, result: result)
-
-        case "stopStreaming":
-            handleStopStreaming(call: call, result: result)
-
-        case "readLoggedHeartRate":
-            handleReadLoggedHeartRate(call: call, result: result)
-
-        case "readLoggedStress":
-            handleReadLoggedStress(call: call, result: result)
-
-        case "readLoggedRespiration":
-            handleReadLoggedRespiration(call: call, result: result)
-
-        case "readWellnessEpochs":
-            handleReadWellnessEpochs(call: call, result: result)
-
-        case "readWellnessSummaries":
-            handleReadWellnessSummaries(call: call, result: result)
-
-        case "readSleepSessions":
-            handleReadSleepSessions(call: call, result: result)
-
-        case "readActivitySummaries":
-            handleReadActivitySummaries(call: call, result: result)
-
-        case "scanAccessPoints":
-            handleScanAccessPoints(call: call, result: result)
-
-        case "storeAccessPoint":
-            handleStoreAccessPoint(call: call, result: result)
-
+            result(false)
         default:
-            result(FlutterMethodNotImplemented)
-        }
-    }
-
-    // MARK: - SDK Initialization
-
-    private func handleIsAvailable(result: @escaping FlutterResult) {
-        result(isGarminSDKAvailable)
-    }
-
-    private func handleInitializeSDK(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let licenseKey = args["licenseKey"] as? String else {
             result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "License key is required",
-                details: nil
-            ))
-            return
-        }
-
-        self.licenseKey = licenseKey
-
-        #if canImport(Companion)
-        Task {
-            do {
-                let sdkConfiguration = SDKConfiguration(processData: false, persistFITFiles: true)
-                let sdkLoggerConfiguration = SDKLoggerConfiguration(mode: .verbose, writeToFile: true, overwriteFile: false)
-
-                try await ConfigurationManager.shared.start(
-                    withSDKConfiguration: sdkConfiguration,
-                    loggerConfiguration: sdkLoggerConfiguration,
-                    delegate: nil
-                )
-                try ConfigurationManager.shared.set(license: licenseKey)
-
-                // Set up delegates
-                DeviceManager.shared.set(scanDelegate: self)
-                DeviceManager.shared.add(connectionDelegate: self)
-                DeviceManager.shared.add(syncDelegate: self)
-
-                // Seed Flutter with the current connection state of every
-                // already-paired device. The SDK auto-reconnects during
-                // ConfigurationManager.start(...) and didConnect has usually
-                // already fired by the time we reach this point — without
-                // this replay, Flutter's first view of the world is empty
-                // and "Connected Wearables" reports disconnected until a
-                // new didConnect happens to fire.
-                if let paired = try? DeviceManager.shared.getPairedDevices() {
-                    for device in paired {
-                        let state = device.isConnected ? "connected" : "disconnected"
-                        self.connectionStateHandler?.sendConnectionState(
-                            state,
-                            deviceId: Int(device.unitID ?? 0),
-                            error: nil
-                        )
-                    }
-                }
-
-                await MainActor.run {
-                    self.isSDKInitialized = true
-                    result(true)
-                }
-            } catch {
-                await MainActor.run {
-                    result(FlutterError(
-                        code: "LICENSE_INVALID",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
-            }
-        }
-        #else
-        // SDK not available - return success for development
-        isSDKInitialized = true
-        result(true)
-        #endif
-    }
-
-    // MARK: - Device Scanning
-
-    private func handleStartScanning(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard isSDKInitialized else {
-            result(FlutterError(
-                code: "NOT_INITIALIZED",
-                message: "Garmin SDK not initialized",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        let args = call.arguments as? [String: Any]
-        let deviceTypeStrings = args?["deviceTypes"] as? [String]
-
-        // Convert string device types to SDK types
-        var deviceTypes: [DeviceType] = DeviceType.allKnown
-        if let typeStrings = deviceTypeStrings {
-            deviceTypes = typeStrings.compactMap { parseDeviceType($0) }
-        }
-
-        scannedDevicesCache.removeAll()
-
-        do {
-            try DeviceManager.shared.scan(for: deviceTypes)
-            result(nil)
-        } catch {
-            result(FlutterError(
-                code: "SCAN_FAILED",
-                message: error.localizedDescription,
+                code: "UNAVAILABLE",
+                message: "Garmin SDK bridge is not available on iOS — install the companion overlay to enable RTS",
                 details: nil
             ))
         }
-        #else
-        result(nil)
-        #endif
-    }
-
-    private func handleStopScanning(result: @escaping FlutterResult) {
-        #if canImport(Companion)
-        try? DeviceManager.shared.stopScanning()
-        // Keep scannedDevicesCache — pairDevice needs it after scan stops
-        #endif
-        result(nil)
-    }
-
-    // MARK: - Device Pairing
-
-    private func handlePairDevice(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard isSDKInitialized else {
-            result(FlutterError(
-                code: "NOT_INITIALIZED",
-                message: "Garmin SDK not initialized",
-                details: nil
-            ))
-            return
-        }
-
-        guard let args = call.arguments as? [String: Any],
-              let identifier = args["identifier"] as? String else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Device identifier is required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        // Find the scanned device with matching identifier
-        guard let scannedDevice = scannedDevicesCache.first(where: { $0.identifier.uuidString == identifier }) else {
-            result(FlutterError(
-                code: "DEVICE_NOT_FOUND",
-                message: "Device not found in scanned devices",
-                details: nil
-            ))
-            return
-        }
-
-        Task {
-            do {
-                let device = try await DeviceManager.shared.pair(scannedDevice)
-                self.activeDevice = device
-                await MainActor.run {
-                    result(self.deviceToMap(device))
-                }
-            } catch {
-                await MainActor.run {
-                    result(FlutterError(
-                        code: "PAIRING_FAILED",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
-            }
-        }
-        #else
-        // Placeholder response for development
-        result([
-            "unitId": 12345,
-            "identifier": identifier,
-            "name": "Garmin Device",
-            "type": "fitness_tracker",
-            "connectionState": "connected",
-            "supportsStreaming": true
-        ])
-        #endif
-    }
-
-    private func handleCancelPairing(result: @escaping FlutterResult) {
-        #if canImport(Companion)
-        // Cancel pairing is handled by the SDK automatically when scan is stopped
-        try? DeviceManager.shared.stopScanning()
-        #endif
-        result(nil)
-    }
-
-    private func handleForgetDevice(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID is required",
-                details: nil
-            ))
-            return
-        }
-
-        let deleteData = args["deleteData"] as? Bool ?? false
-
-        #if canImport(Companion)
-        Task {
-            do {
-                if let devices = try? DeviceManager.shared.getPairedDevices(),
-                   let device = devices.first(where: { $0.unitID == UInt32(unitId) }) {
-                    try await DeviceManager.shared.delete(device: device, deleteData: deleteData)
-                    if self.activeDevice?.unitID == UInt32(unitId) {
-                        self.activeDevice = nil
-                    }
-                }
-                await MainActor.run {
-                    result(nil)
-                }
-            } catch {
-                await MainActor.run {
-                    result(FlutterError(
-                        code: "DELETE_FAILED",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
-            }
-        }
-        #else
-        result(nil)
-        #endif
-    }
-
-    private func handleGetPairedDevices(result: @escaping FlutterResult) {
-        guard isSDKInitialized else {
-            result(FlutterError(
-                code: "NOT_INITIALIZED",
-                message: "Garmin SDK not initialized",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        do {
-            let devices = try DeviceManager.shared.getPairedDevices()
-            let deviceMaps = devices.map { deviceToMap($0) }
-            result(deviceMaps)
-        } catch {
-            result(FlutterError(
-                code: "GET_DEVICES_FAILED",
-                message: error.localizedDescription,
-                details: nil
-            ))
-        }
-        #else
-        result([])
-        #endif
-    }
-
-    // MARK: - Connection State
-
-    private func handleGetConnectionState(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID is required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        if let devices = try? DeviceManager.shared.getPairedDevices(),
-           let device = devices.first(where: { $0.unitID == UInt32(unitId) }) {
-            result(device.isConnected ? "connected" : "disconnected")
-        } else {
-            result("disconnected")
-        }
-        #else
-        result("disconnected")
-        #endif
-    }
-
-    // MARK: - Sync Operations
-
-    private func handleRequestSync(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID is required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        Task {
-            do {
-                if let devices = try? DeviceManager.shared.getPairedDevices(),
-                   let device = devices.first(where: { $0.unitID == UInt32(unitId) }) {
-                    try await DeviceManager.shared.requestSync(with: device)
-                }
-                await MainActor.run {
-                    result(nil)
-                }
-            } catch {
-                await MainActor.run {
-                    result(FlutterError(
-                        code: "SYNC_FAILED",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
-            }
-        }
-        #else
-        result(nil)
-        #endif
-    }
-
-    private func handleGetBatteryLevel(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID is required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        Task {
-            do {
-                if let devices = try? DeviceManager.shared.getPairedDevices(),
-                   let device = devices.first(where: { $0.unitID == UInt32(unitId) }) {
-                    let level = try await device.getBatteryChargeLevel()
-                    await MainActor.run {
-                        result(level)
-                    }
-                } else {
-                    await MainActor.run {
-                        result(nil)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    result(nil)
-                }
-            }
-        }
-        #else
-        result(nil)
-        #endif
-    }
-
-    // MARK: - Real-Time Streaming
-
-    private func handleStartStreaming(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard isSDKInitialized else {
-            result(FlutterError(
-                code: "NOT_INITIALIZED",
-                message: "Garmin SDK not initialized",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        let args = call.arguments as? [String: Any]
-        let dataTypeStrings = args?["dataTypes"] as? [String]
-        let requestedUnitId = args?["deviceId"] as? Int
-
-        // Default to all supported real-time types
-        var realTimeTypes: RealTimeTypes = [
-            .heartRate,
-            .stress,
-            .beatToBeatInterval,
-            .spo2,
-            .respiration,
-            .bodyBattery,
-            .steps,
-            .accelerometer
-        ]
-
-        // Parse data types if provided
-        if let typeStrings = dataTypeStrings, !typeStrings.isEmpty {
-            realTimeTypes = []
-            for typeString in typeStrings {
-                if let type = parseRealTimeType(typeString) {
-                    realTimeTypes.insert(type)
-                }
-            }
-        }
-
-        // Resolve target device. Honor the deviceId (unitID) arg when Dart
-        // passes one so the user's preferred device is used instead of
-        // silently defaulting to paired.first — flagged in Garmin review.
-        if let unitId = requestedUnitId,
-           let paired = try? DeviceManager.shared.getPairedDevices(),
-           let match = paired.first(where: { $0.unitID == UInt32(unitId) }) {
-            activeDevice = match
-        } else if activeDevice == nil {
-            if let paired = try? DeviceManager.shared.getPairedDevices(),
-               let first = paired.first {
-                activeDevice = first
-            }
-        }
-
-        if let device = activeDevice {
-            device.add(realTimeDelegate: self)
-            // Request each type individually — some types may not be supported
-            // on all Garmin devices and would cause the entire batch to fail.
-            let allKnownTypes: [RealTimeTypes] = [
-                .heartRate, .stress, .beatToBeatInterval, .spo2,
-                .respiration, .bodyBattery, .steps, .accelerometer,
-            ]
-            var enabledTypes: RealTimeTypes = []
-            for type in allKnownTypes where realTimeTypes.contains(type) {
-                do {
-                    try device.startListening(for: type)
-                    enabledTypes.insert(type)
-                } catch {
-                    NSLog("[GarminSDK] Skipping unsupported real-time type: \(type) — \(error.localizedDescription)")
-                }
-            }
-            if enabledTypes.isEmpty {
-                result(FlutterError(
-                    code: "STREAMING_FAILED",
-                    message: "No supported real-time types on this device",
-                    details: nil
-                ))
-            } else {
-                result(nil)
-            }
-        } else {
-            result(FlutterError(
-                code: "NO_DEVICE",
-                message: "No active device",
-                details: nil
-            ))
-        }
-        #else
-        result(nil)
-        #endif
-    }
-
-    private func handleStopStreaming(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        #if canImport(Companion)
-        if let device = activeDevice {
-            device.stopListening(for: [
-                .heartRate,
-                .stress,
-                .beatToBeatInterval,
-                .spo2,
-                .respiration,
-                .bodyBattery,
-                .steps,
-                .accelerometer
-            ])
-            device.remove(realTimeDelegate: self)
-        }
-        #endif
-        result(nil)
-    }
-
-    // MARK: - Logged Data Reading
-
-    private func handleReadLoggedHeartRate(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        // Note: The Companion SDK stores logged data in FIT files
-        // This would require processing FIT files to extract heart rate data
-        result([])
-    }
-
-    private func handleReadLoggedStress(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    private func handleReadLoggedRespiration(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    // MARK: - Wellness Data
-
-    private func handleReadWellnessEpochs(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    private func handleReadWellnessSummaries(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    // MARK: - Sleep Data
-
-    private func handleReadSleepSessions(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    // MARK: - Activity Data
-
-    private func handleReadActivitySummaries(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        result([])
-    }
-
-    // MARK: - WiFi Operations
-
-    private func handleScanAccessPoints(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID is required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        Task {
-            do {
-                if let devices = try? DeviceManager.shared.getPairedDevices(),
-                   let device = devices.first(where: { $0.unitID == UInt32(unitId) }) {
-                    let accessPoints = try await device.scanAccessPoints()
-                    let maps = accessPoints.map { ap -> [String: Any] in
-                        return [
-                            "ssid": ap.ssid,
-                            "signalStrength": ap.signalStrength,
-                            "isSecured": ap.securityType != .open
-                        ]
-                    }
-                    await MainActor.run {
-                        result(maps)
-                    }
-                } else {
-                    await MainActor.run {
-                        result([])
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    result(FlutterError(
-                        code: "WIFI_SCAN_FAILED",
-                        message: error.localizedDescription,
-                        details: nil
-                    ))
-                }
-            }
-        }
-        #else
-        result([])
-        #endif
-    }
-
-    private func handleStoreAccessPoint(call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard let args = call.arguments as? [String: Any],
-              let unitId = args["unitId"] as? Int,
-              let ssid = args["ssid"] as? String,
-              let password = args["password"] as? String else {
-            result(FlutterError(
-                code: "INVALID_ARGUMENTS",
-                message: "Unit ID, SSID, and password are required",
-                details: nil
-            ))
-            return
-        }
-
-        #if canImport(Companion)
-        // This would require finding the scanned access point with matching SSID
-        // and then storing it on the device
-        result(nil)
-        #else
-        result(nil)
-        #endif
-    }
-
-    // MARK: - Helper Methods
-
-    #if canImport(Companion)
-    private func deviceToMap(_ device: Device) -> [String: Any] {
-        var map: [String: Any] = [
-            "unitId": Int(device.unitID ?? 0),
-            "identifier": device.identifier.uuidString,
-            "name": device.name,
-            "type": deviceTypeToString(device.type),
-            "connectionState": device.isConnected ? "connected" : "disconnected",
-            "supportsStreaming": true
-        ]
-
-        if let version = device.softwareVersionString as String? {
-            map["firmwareVersion"] = version
-        }
-
-        return map
-    }
-
-    private func scannedDeviceToMap(_ device: ScannedDevice) -> [String: Any] {
-        return [
-            "identifier": device.identifier.uuidString,
-            "name": device.name,
-            "type": deviceTypeToString(device.type),
-            "isPaired": false
-        ]
-    }
-
-    private func deviceTypeToString(_ type: DeviceType) -> String {
-        let name = String(describing: type)
-        if name.lowercased().contains("vivo") || name.lowercased().contains("venu") || name.lowercased().contains("lily") {
-            return "fitness_tracker"
-        } else if name.lowercased().contains("forerunner") {
-            return "running_watch"
-        } else if name.lowercased().contains("fenix") || name.lowercased().contains("instinct") || name.lowercased().contains("enduro") || name.lowercased().contains("tactix") || name.lowercased().contains("epix") || name.lowercased().contains("marq") {
-            return "outdoor_watch"
-        } else if name.lowercased().contains("edge") {
-            return "cycling_computer"
-        } else if name.lowercased().contains("descent") {
-            return "diving_watch"
-        } else if name.lowercased().contains("d2") {
-            return "aviation_watch"
-        } else if name.lowercased().contains("approach") {
-            return "golf_watch"
-        } else if name.lowercased().contains("hrm") {
-            return "heart_rate_monitor"
-        }
-        return "unknown"
-    }
-
-    private func parseDeviceType(_ typeString: String) -> DeviceType? {
-        // Return nil to use allKnown default; specific model filtering
-        // is not practical with 100+ individual device type enum cases.
-        return nil
-    }
-
-    private func parseRealTimeType(_ typeString: String) -> RealTimeTypes? {
-        switch typeString.lowercased() {
-        case "heart_rate", "heartrate":
-            return .heartRate
-        case "stress":
-            return .stress
-        case "hrv", "heart_rate_variability", "bbi", "beat_to_beat":
-            return .beatToBeatInterval
-        case "spo2":
-            return .spo2
-        case "respiration":
-            return .respiration
-        case "body_battery", "bodybattery":
-            return .bodyBattery
-        case "steps":
-            return .steps
-        case "accelerometer":
-            return .accelerometer
-        default:
-            return nil
-        }
-    }
-    #endif
-}
-
-// MARK: - SDK Delegate Extensions
-
-#if canImport(Companion)
-extension GarminSDKBridge: @preconcurrency ScanDelegate {
-    public func didScan(device: ScannedDevice) {
-        scannedDevicesCache.append(device)
-        let deviceMaps = scannedDevicesCache.map { scannedDeviceToMap($0) }
-        scannedDevicesHandler?.sendScannedDevices(deviceMaps)
-    }
-
-    public func didFail(error: Error) {
-        // Handle scan failure
-    }
-}
-
-extension GarminSDKBridge: @preconcurrency ConnectionDelegate {
-    public func didConnect(device: Device) {
-        connectionStateHandler?.sendConnectionState(
-            "connected",
-            deviceId: Int(device.unitID ?? 0),
-            error: nil
-        )
-    }
-
-    public func didDisconnect(device: Device) {
-        connectionStateHandler?.sendConnectionState(
-            "disconnected",
-            deviceId: Int(device.unitID ?? 0),
-            error: nil
-        )
-    }
-
-    public func didFail(device: Device, error: Error) {
-        connectionStateHandler?.sendConnectionState(
-            "failed",
-            deviceId: Int(device.unitID ?? 0),
-            error: error.localizedDescription
-        )
-    }
-}
-
-extension GarminSDKBridge: @preconcurrency SyncDelegate {
-    public func didStart(uuid: UUID) {
-        syncProgressHandler?.sendSyncProgress(progress: 0, direction: "download", deviceId: 0)
-    }
-
-    public func progress(uuid: UUID, amount: Double, direction: SyncDirection) {
-        let directionString = direction == .toPhone ? "download" : "upload"
-        syncProgressHandler?.sendSyncProgress(progress: amount, direction: directionString, deviceId: 0)
-    }
-
-    public func didComplete(uuid: UUID, error: Error?) {
-        syncProgressHandler?.sendSyncProgress(progress: 1.0, direction: "complete", deviceId: 0)
-    }
-}
-
-extension GarminSDKBridge: @preconcurrency RealTimeDelegate {
-    public func didUpdate(results: RealTimeResult, type: RealTimeTypes, device: Device) {
-        var data: [String: Any] = [
-            "timestamp": Int64(Date().timeIntervalSince1970 * 1000),
-            "deviceId": Int(device.unitID ?? 0)
-        ]
-
-        if let hr = results.heartRate {
-            data["heartRate"] = hr
-        }
-
-        if let stress = results.stressLevel {
-            data["stress"] = stress
-        }
-
-        if let bbi = results.bbi {
-            data["hrv"] = bbi
-            data["bbiIntervals"] = [Double(bbi)]
-        }
-
-        if let spo2 = results.oxygenLevel {
-            data["spo2"] = spo2
-        }
-
-        if let respiration = results.breathsPerMinute {
-            data["respiration"] = respiration
-        }
-
-        if let bodyBattery = results.bodyBatteryLevel {
-            data["bodyBattery"] = bodyBattery
-        }
-
-        if let steps = results.steps {
-            data["steps"] = steps
-        }
-
-        if let accel = results.accelerometerSamples?.last {
-            data["accelerometer"] = [
-                "x": accel.xValue,
-                "y": accel.yValue,
-                "z": accel.zValue,
-                "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
-            ]
-        }
-
-        realTimeDataHandler?.sendRealTimeData(data)
-    }
-
-    public func didError(_ error: Error, device: Device) {
-        // Handle streaming error
-    }
-}
-#endif
-
-// MARK: - Event Channel Handlers
-
-/// Handler for connection state events
-class GarminConnectionStateHandler: NSObject, FlutterStreamHandler {
-    private var eventSink: FlutterEventSink?
-
-    // Per-device last-known state. The Garmin SDK auto-reconnects paired
-    // devices during initialize() and fires didConnect before Flutter has
-    // subscribed to the event channel, which means the first "connected"
-    // event was being silently dropped and the UI stayed on "disconnected"
-    // until the watch physically re-paired. Caching lets us replay the
-    // latest state for every known device the moment Flutter attaches.
-    private var lastStateByDevice: [Int: [String: Any]] = [:]
-    private var lastStateOrder: [Int] = []
-    // Bounded buffer for events without a deviceId (e.g. service-level
-    // failures) so a chatty signal can't grow unbounded while unlistened.
-    private var anonymousEvents: [[String: Any]] = []
-    private let anonymousCap = 16
-    private let queue = DispatchQueue(label: "ai.synheart.wear.garmin.connstate")
-
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        queue.sync {
-            self.eventSink = events
-            let ordered = lastStateOrder.compactMap { lastStateByDevice[$0] }
-            let anon = anonymousEvents
-            DispatchQueue.main.async {
-                ordered.forEach { events($0) }
-                anon.forEach { events($0) }
-            }
-        }
-        return nil
-    }
-
-    func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        queue.sync { eventSink = nil }
-        return nil
-    }
-
-    func sendConnectionState(_ state: String, deviceId: Int?, error: String?) {
-        var data: [String: Any] = ["state": state]
-        if let deviceId = deviceId {
-            data["deviceId"] = deviceId
-        }
-        if let error = error {
-            data["error"] = error
-        }
-        data["timestamp"] = Int64(Date().timeIntervalSince1970 * 1000)
-        queue.sync {
-            if let deviceId = deviceId {
-                if lastStateByDevice[deviceId] == nil {
-                    lastStateOrder.append(deviceId)
-                }
-                lastStateByDevice[deviceId] = data
-            } else {
-                anonymousEvents.append(data)
-                if anonymousEvents.count > anonymousCap {
-                    anonymousEvents.removeFirst(anonymousEvents.count - anonymousCap)
-                }
-            }
-            let sink = eventSink
-            DispatchQueue.main.async { sink?(data) }
-        }
-    }
-}
-
-/// Handler for scanned devices events
-class GarminScannedDevicesHandler: NSObject, FlutterStreamHandler {
-    private var eventSink: FlutterEventSink?
-
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.eventSink = events
-        return nil
-    }
-
-    func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSink = nil
-        return nil
-    }
-
-    func sendScannedDevices(_ devices: [[String: Any]]) {
-        eventSink?(devices)
-    }
-}
-
-/// Handler for real-time data events
-class GarminRealTimeDataHandler: NSObject, FlutterStreamHandler {
-    private var eventSink: FlutterEventSink?
-
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.eventSink = events
-        return nil
-    }
-
-    func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSink = nil
-        return nil
-    }
-
-    func sendRealTimeData(_ data: [String: Any]) {
-        eventSink?(data)
-    }
-}
-
-/// Handler for sync progress events
-class GarminSyncProgressHandler: NSObject, FlutterStreamHandler {
-    private var eventSink: FlutterEventSink?
-
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
-        self.eventSink = events
-        return nil
-    }
-
-    func onCancel(withArguments arguments: Any?) -> FlutterError? {
-        eventSink = nil
-        return nil
-    }
-
-    func sendSyncProgress(progress: Double, direction: String, deviceId: Int) {
-        eventSink?([
-            "progress": progress,
-            "direction": direction,
-            "deviceId": deviceId
-        ])
     }
 }

@@ -58,9 +58,15 @@ fetch-garmin: check-garmin
 
 # Overlay the licensed companion files on top of the open-source tree.
 #
-# As of the dart-out-of-companion refactor, only the Kotlin native wrapper(s)
+# As of the dart-out-of-companion refactor, only the native native wrapper(s)
 # live in the companion repo. All Dart code (adapters, models, errors) is
 # OSS, so the overlay no longer touches `lib/`.
+#
+# Android: Kotlin wrappers + the protected GarminSDKBridge.kt stub.
+# iOS: the GarminSDKBridgeImpl.swift implementation, dropped into the
+#      gitignored `ios/Classes/Garmin/Impl/` directory. The OSS iOS
+#      GarminSDKBridge.swift stub stays untouched and looks the impl up
+#      at runtime via NSClassFromString.
 #
 # IMPORTANT: for each PROTECTED_STUB, we save the tracked OSS file to
 # `<path>.stub` BEFORE replacing it with a symlink. `clean-garmin` restores
@@ -83,14 +89,26 @@ link-garmin:
 		ln -sf $$(pwd)/.garmin/$(GARMIN_SUBDIR)/android/src/main/kotlin/ai/synheart/wear/garmin/$$f \
 			android/src/main/kotlin/ai/synheart/wear/garmin/$$f; \
 	done
+	@# iOS overlay — symlink the licensed impl into the gitignored Impl/
+	@# directory. No tracked stub to protect: Impl/*.swift is gitignored.
+	@mkdir -p ios/Classes/Garmin/Impl
+	@if [ -f .garmin/$(GARMIN_SUBDIR)/ios/Classes/Garmin/GarminSDKBridgeImpl.swift ]; then \
+		ln -sf $$(pwd)/.garmin/$(GARMIN_SUBDIR)/ios/Classes/Garmin/GarminSDKBridgeImpl.swift \
+			ios/Classes/Garmin/Impl/GarminSDKBridgeImpl.swift; \
+	else \
+		echo "  ○ .garmin/$(GARMIN_SUBDIR)/ios/Classes/Garmin/GarminSDKBridgeImpl.swift not found — iOS overlay skipped"; \
+		echo "    (update the companion repo or set GARMIN_BRANCH= to a branch that includes it)"; \
+	fi
 	@echo "✓ Garmin RTS files linked"
 	@echo "  (the pre-commit hook will block accidental staging of overlay symlinks)"
 
 # Remove symlinks, the .garmin clone, AND restore the tracked stub.
 clean-garmin:
 	@rm -rf .garmin
-	@# Remove overlay symlinks (they become dangling after .garmin/ removal).
+	@# Remove Android overlay symlinks (dangling after .garmin/ removal).
 	@find android/src/main/kotlin/ai/synheart/wear/garmin/ -type l -delete 2>/dev/null || true
+	@# Remove iOS overlay symlinks (dangling after .garmin/ removal).
+	@find ios/Classes/Garmin/Impl/ -type l -delete 2>/dev/null || true
 	@# Restore the protected stub from backup if missing.
 	@for path in $(PROTECTED_STUBS); do \
 		if [ -f "$$path.stub" ] && [ ! -e "$$path" ]; then \

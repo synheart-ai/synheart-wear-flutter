@@ -108,6 +108,12 @@ vendor/flux/
 .garmin.tar.gz
 .garmin.tgz
 
+# The iOS overlay symlink (`make link-garmin` drops GarminSDKBridgeImpl.swift
+# here as a symlink into `.garmin/dart/ios/...`). The directory itself stays
+# tracked (README.md explains the convention); only overlay source files are
+# ignored so the symlink can never accidentally land in OSS.
+ios/Classes/Garmin/Impl/*.swift
+
 # The companion overlay only replaces the licensed Kotlin native wrapper(s).
 # All Dart code (adapters + models) lives in this repo as regular OSS files.
 # We still must guard against the overlay leaking the Kotlin file as a symlink
