@@ -1,0 +1,39 @@
+# Dart documentation generation options
+# Run: dart doc
+
+# Include private declarations in the generated docs
+includePrivate: false
+
+# Exclude certain libraries from documentation
+exclude:
+  - 'lib/src/adapters/android_health_helper.dart'
+  - 'lib/src/adapters/healthkit_platform.dart'
+  - 'lib/src/adapters/healthkit_rr_channel.dart'
+
+# Set the output directory
+output: 'doc/api'
+
+# Set the title for the generated documentation
+title: 'Synheart Wear SDK API Reference'
+
+# Link to external documentation
+linkTo:
+  - url: 'https://pub.dev/documentation/health/latest/'
+    name: 'health package'
+  - url: 'https://flutter.dev/docs'
+    name: 'Flutter'
+
+# Include source code in documentation
+includeSource: true
+
+# Set the favicon
+# favicon: 'favicon.ico'
+
+# Custom header
+# header:
+#   - 'Custom header content'
+
+# Custom footer
+# footer:
+#   - 'Custom footer content'
+

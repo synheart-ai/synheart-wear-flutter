@@ -1,0 +1,155 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/coverage/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# Android related
+**/android/**/gradle-wrapper.jar
+**/android/.gradle
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+*.jks
+
+# iOS/XCode related
+**/ios/**/*.mode1v3
+**/ios/**/*.mode2v3
+**/ios/**/*.moved-aside
+**/ios/**/*.pbxuser
+**/ios/**/*.perspectivev3
+**/ios/**/*sync/
+**/ios/**/.sconsign.dblite
+**/ios/**/.tags*
+**/ios/**/.vagrant/
+**/ios/**/DerivedData/
+**/ios/**/Icon?
+**/ios/**/Pods/
+**/ios/**/.symlinks/
+**/ios/**/profile
+**/ios/**/xcuserdata
+**/ios/.generated/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# Coverage
+coverage/
+*.lcov
+
+# Garmin SDK (licensed - must be downloaded separately)
+# Keep README.md files for setup instructions
+ios/Frameworks/*.xcframework
+ios/Frameworks/*.framework
+android/libs/*.aar
+android/libs/*.jar
+android/repo/**/*.aar
+!android/libs/README.md
+!ios/Frameworks/README.md
+vendor/garmin/
+vendor/flux/
+
+# Garmin RTS companion (cloned at build time)
+.garmin/
+# Also block any ad-hoc archive of the companion (e.g. a Finder-created
+# `.garmin.zip`) that would otherwise ship the licensed overlay as a single
+# blob if it ever hit `git add -A`.
+.garmin.zip
+.garmin.tar
+.garmin.tar.gz
+.garmin.tgz
+
+# The iOS overlay symlink (`make link-garmin` drops GarminSDKBridgeImpl.swift
+# here as a symlink into `.garmin/dart/ios/...`). The directory itself stays
+# tracked (README.md explains the convention); only overlay source files are
+# ignored so the symlink can never accidentally land in OSS.
+ios/Classes/Garmin/Impl/*.swift
+
+# The companion overlay only replaces the licensed Kotlin native wrapper(s).
+# All Dart code (adapters + models) lives in this repo as regular OSS files.
+# We still must guard against the overlay leaking the Kotlin file as a symlink
+# pointing into `.garmin/` (which uses absolute developer paths). The
+# pre-commit hook + CI `make verify-clean` cover the runtime side; this rule
+# keeps any other companion-only Kotlin files (e.g. `GarminHealthSdkWrapper.kt`,
+# `GarminSdkWrapper.kt`) out of the index entirely.
+android/src/main/kotlin/ai/synheart/wear/garmin/Garmin*Wrapper.kt
+
+# `make link-garmin` saves the tracked OSS stub to `<path>.stub` before
+# replacing it with a symlink, then `make clean-garmin` restores from the
+# backup. The backup is purely a developer-machine artifact and must never be
+# staged — `git add -A` would otherwise pick it up as a new file.
+**/*.kt.stub
+
+# Exceptions to above rules.
+!**/ios/**/default.mode1v3
+!**/ios/**/default.mode2v3
+!**/ios/**/default.pbxuser
+!**/ios/**/default.perspectivev3
+
+# Secrets & credentials
+*.asc
+*.key
+.env
+.env.*
+!.env.example
+
+# FVM Version Cache
+.fvm/
+.fvmrc
+
+# VS Code (user-specific)
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/extensions.json
+
+.garmin

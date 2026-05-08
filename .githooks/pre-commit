@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Reject commits that try to stage Garmin overlay symlinks at the two
+# canonical OSS stub paths. The companion overlay (`make build-with-garmin`)
+# replaces those stubs with symlinks pointing into `.garmin/` on developer
+# machines; if those symlinks ever land in `git add`, they ship absolute
+# developer paths into the open-source tree (see PR #23 / #?? for context).
+#
+# Install with:
+#     git config core.hooksPath .githooks
+#
+# Or run `make install-hooks`, which does the same thing.
+set -e
+
+PROTECTED_STUBS=(
+  "android/src/main/kotlin/ai/synheart/wear/garmin/GarminSDKBridge.kt"
+)
+
+fail=0
+for path in "${PROTECTED_STUBS[@]}"; do
+  # File mode in the index. 120000 = symlink, 100644 = regular file.
+  mode="$(git ls-files --stage -- "$path" 2>/dev/null | awk '{print $1}')"
+  if [[ "$mode" == "120000" ]]; then
+    if [[ $fail -eq 0 ]]; then
+      echo "✗ Refusing to commit: Garmin overlay symlinks detected in the index."
+      echo
+    fi
+    target="$(readlink "$path" 2>/dev/null || echo '<unresolved>')"
+    echo "    $path"
+    echo "      → $target"
+    fail=1
+  fi
+done
+
+if [[ $fail -ne 0 ]]; then
+  cat <<'EOF'
+
+These paths are tracked open-source stubs. The companion overlay must NEVER
+be staged on top of them. To recover:
+
+    make clean-garmin           # removes .garmin/ + restores the OSS stubs
+    git add -p                  # re-stage only the changes you intended
+    git commit                  # try again
+
+If you really need RTS during development, run:
+
+    make build-with-garmin
+
+…AFTER your commit lands. The hook only blocks `commit`, not the overlay.
+EOF
+  exit 1
+fi
+
+exit 0

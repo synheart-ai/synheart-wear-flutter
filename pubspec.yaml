@@ -1,0 +1,45 @@
+name: synheart_wear
+description: Flutter SDK for wearable signals — Apple HealthKit, Health Connect, WHOOP, Garmin, Oura, and Fitbit. Unified HR, HRV, steps, calories, distance, stress.
+version: 0.4.0
+homepage: https://github.com/synheart-ai/synheart-wear-flutter
+repository: https://github.com/synheart-ai/synheart-wear-flutter
+issue_tracker: https://github.com/synheart-ai/synheart-wear-flutter/issues
+license: Apache-2.0
+topics:
+  - wearable
+  - biosignals
+  - flutter
+  - health
+  - hrv
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+  flutter: ">=3.32.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  collection: ^1.18.0
+  meta: ^1.16.0
+  uuid: ^4.4.0
+  path_provider: ^2.1.4
+  health: ^13.2.1
+  platform: ^3.1.6
+  encrypt: ^5.0.1
+  http: ^1.2.0
+  url_launcher: ^6.3.0
+  shared_preferences: ^2.2.2
+  # Apple Health XML backfill
+  crypto: ^3.0.3
+  xml: ^6.5.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  very_good_analysis: ^6.0.0
+flutter:
+  # This package exposes platform plugins for iOS (HealthKit RR) and Android (Health Connect helpers)
+  plugin:
+    platforms:
+      ios:
+        pluginClass: SynheartWearPlugin
+      android:
+        package: ai.synheart.wear
+        pluginClass: SynheartWearPlugin

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  garmin-overlay-guard:
+    name: Garmin overlay safety check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify no Garmin companion overlay symlinks landed in tree
+        run: make verify-clean
+
+  test:
+    name: Analyze & Test (Flutter ${{ matrix.flutter }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter:
+          # Lowest Flutter that bundles Dart >= 3.8 (matches pubspec)
+          - "3.32.0"
+          # Track latest stable to catch upcoming breakages early
+          - "stable"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Flutter (pinned)
+        if: matrix.flutter != 'stable'
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ matrix.flutter }}
+          channel: stable
+      - name: Setup Flutter (stable channel)
+        if: matrix.flutter == 'stable'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test

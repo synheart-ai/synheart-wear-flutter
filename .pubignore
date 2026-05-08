@@ -1,0 +1,46 @@
+# Ignore generated and IDE-specific files
+**/*.g.dart
+**/*.freezed.dart
+**/*.mocks.dart
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+/build/
+android/build/
+example/build/
+.flutter-plugins
+.flutter-plugins-dependencies
+**/generated_plugin_registrant.dart
+
+# Generated documentation (host separately, not on pub.dev)
+doc/api/
+
+# Vendor / licensed SDKs / large artifacts (not shipped on pub.dev).
+# The Garmin Companion SDK is licensed software and must be downloaded
+# separately by consumers who hold a Garmin license — see
+# docs/GARMIN_SETUP.md.
+vendor/
+ios/Frameworks/**/*.xcframework/
+ios/Frameworks/**/*.framework/
+android/libs/*.aar
+android/libs/*.jar
+android/repo/
+.garmin/
+.garmin.zip
+.garmin.tar
+.garmin.tar.gz
+.garmin.tgz
+
+# Platform-specific
+ios/Pods/
+ios/.symlinks/
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
+# User-specific
+**/xcuserdata/

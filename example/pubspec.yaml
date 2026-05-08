@@ -1,0 +1,27 @@
+name: synheart_wear_example
+description: Example Flutter app for Synheart Wear SDK (WHOOP, Garmin, RAMEN).
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  synheart_wear:
+    path: ../
+  app_links: ^6.3.2
+  shared_preferences: ^2.2.2
+  grpc: ^3.2.0
+  protobuf: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
