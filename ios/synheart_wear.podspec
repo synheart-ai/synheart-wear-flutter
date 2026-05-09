@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'synheart_wear'
-  s.version          = '0.4.0'
+  s.version          = '0.4.1'
   s.summary          = 'Unified wearable SDK for Synheart (iOS plugin)'
   s.description      = <<-DESC
 Synheart Wear iOS plugin for HealthKit heartbeat series (RR) integration
@@ -26,30 +26,25 @@ and optional Garmin Companion SDK integration.
   # ============================================================================
   #
   # The Garmin Companion SDK requires a license from Garmin Health.
-  # If you have a license, follow these steps:
-  #
-  # 1. Download the Garmin Companion SDK XCFramework from your
-  #    Garmin Health SDK distribution channel.
-  #
-  # 2. Extract Companion.xcframework and copy it to:
-  #    <your_app>/ios/.symlinks/plugins/synheart_wear/ios/Frameworks/
-  #    OR
-  #    <plugin_path>/ios/Frameworks/Companion.xcframework
-  #
-  # 3. Uncomment the vendored_frameworks line below
-  #
-  # Without the SDK, Garmin methods will return "SDK not available" errors.
+  # If you have a license, drop Companion.xcframework into
+  # `ios/Frameworks/Companion.xcframework` (either in this repo or in
+  # `<your_app>/ios/.symlinks/plugins/synheart_wear/ios/Frameworks/`).
+  # The conditional below detects it at `pod install` time and wires up
+  # vendored_frameworks + weak linking automatically. OSS consumers
+  # without the license skip both — `pod install` still succeeds, and
+  # Garmin methods return "SDK not available" at runtime.
   # ============================================================================
 
-  # Uncomment after adding Companion.xcframework to ios/Frameworks/
-  # s.vendored_frameworks = 'Frameworks/Companion.xcframework'
-
-  # Weak linking allows app to run if SDK framework is not present at runtime
-  s.pod_target_xcconfig = {
-    'DEFINES_MODULE' => 'YES',
-    # Uncomment when SDK is present to enable weak linking
-    # 'OTHER_LDFLAGS' => '-weak_framework Companion',
-  }
+  companion_xcframework = File.expand_path('Frameworks/Companion.xcframework', __dir__)
+  if File.exist?(companion_xcframework)
+    s.vendored_frameworks = 'Frameworks/Companion.xcframework'
+    s.pod_target_xcconfig = {
+      'DEFINES_MODULE' => 'YES',
+      'OTHER_LDFLAGS'  => '-weak_framework Companion',
+    }
+  else
+    s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
+  end
 
   # Required frameworks for HealthKit
   s.frameworks = 'HealthKit'

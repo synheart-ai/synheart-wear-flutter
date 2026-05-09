@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-08
+
+### Fixed
+- iOS: Auto-detect `Frameworks/Companion.xcframework` at `pod install`
+  time. When the licensed Garmin Companion XCFramework is present, the
+  podspec now wires up `vendored_frameworks` and `-weak_framework
+  Companion` automatically (previously this required hand-uncommenting
+  two lines, and licensed users hit `Unable to resolve module
+  dependency: 'Companion'` if they forgot). OSS consumers without the
+  framework continue to get a clean `pod install`; Garmin methods
+  surface `GarminSDKError` at runtime as before.
+
 ## [0.4.0] - 2026-05-07
 
 
