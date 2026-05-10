@@ -1,6 +1,6 @@
 # Synheart Wear
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/synheart-ai/synheart-wear-flutter)
+[![Pub Version](https://img.shields.io/pub/v/synheart_wear.svg)](https://pub.dev/packages/synheart_wear)
 [![Flutter](https://img.shields.io/badge/flutter-%3E%3D3.22.0-blue.svg)](https://flutter.dev)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
 
@@ -37,7 +37,7 @@ the `synheart_wear_flutter` target.
 
 ```yaml
 dependencies:
-  synheart_wear: ^0.4.0
+  synheart_wear: ^0.4.1
 ```
 
 ```bash
