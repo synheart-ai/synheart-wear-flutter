@@ -1,3 +1,5 @@
+🌐 Official website: [synheart.ai](https://synheart.ai) — Human State Interface (HSI) infrastructure for developers and AI systems.
+
 # Synheart Wear
 
 [![Pub Version](https://img.shields.io/pub/v/synheart_wear.svg)](https://pub.dev/packages/synheart_wear)
