@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-19
+
+### Changed
+- Logging hygiene pass across the four wearable adapters (WHOOP, Garmin,
+  Fitbit, Oura). Default log level demoted so a live debug run no
+  longer drowns the operator in init dumps and full-payload request /
+  response logs. Multi-line emoji-prefixed init blocks collapsed to one
+  summary line each. Full URIs, full third-party response bodies, and
+  user identifiers are no longer logged at INFO level — they're
+  DEBUG-only or redacted to suffix-only at INFO. Errors and lifecycle
+  events still emit at WARN/ERROR.
+
+### Privacy
+- User identifiers and OAuth state nonces are no longer logged in full
+  at INFO. Full URIs and full third-party API response bodies are
+  DEBUG-only.
+
 ## [0.4.1] - 2026-05-08
 
 ### Fixed
