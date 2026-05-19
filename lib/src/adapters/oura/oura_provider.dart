@@ -71,10 +71,7 @@ class OuraProvider {
        projectId = projectId,
        redirectUri = redirectUri ?? defaultRedirectUri,
        _baseUrlExplicitlyProvided = baseUrl != null {
-    logDebug(
-      '🔧 OuraProvider initialized: baseUrl=${this.baseUrl}, '
-      'appId=$appId, projectId=$projectId',
-    );
+    logDebug('OuraProvider init: appId=$appId');
     if (loadFromStorage) {
       _loadFromStorage();
     }

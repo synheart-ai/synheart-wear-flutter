@@ -68,10 +68,7 @@ class FitbitProvider {
        projectId = projectId,
        redirectUri = redirectUri ?? defaultRedirectUri,
        _baseUrlExplicitlyProvided = baseUrl != null {
-    logDebug(
-      '🔧 FitbitProvider initialized: baseUrl=${this.baseUrl}, '
-      'appId=$appId, projectId=$projectId',
-    );
+    logDebug('FitbitProvider init: appId=$appId');
     if (loadFromStorage) {
       _loadFromStorage();
     }

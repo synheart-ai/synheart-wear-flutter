@@ -83,13 +83,13 @@ class DefaultLogger implements SynheartLogger {
   String _getPrefix(LogLevel level) {
     switch (level) {
       case LogLevel.debug:
-        return '🔍 [SynheartWear DEBUG]';
+        return '[SynheartWear DEBUG]';
       case LogLevel.info:
-        return 'ℹ️ [SynheartWear INFO]';
+        return '[SynheartWear INFO]';
       case LogLevel.warning:
-        return '⚠️ [SynheartWear WARNING]';
+        return '[SynheartWear WARN]';
       case LogLevel.error:
-        return '❌ [SynheartWear ERROR]';
+        return '[SynheartWear ERROR]';
     }
   }
 

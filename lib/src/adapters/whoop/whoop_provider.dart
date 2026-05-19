@@ -57,26 +57,17 @@ class WhoopProvider {
        projectId = projectId,
        redirectUri = redirectUri ?? defaultRedirectUri,
        _baseUrlExplicitlyProvided = baseUrl != null {
-    logDebug('🔧 WhoopProvider initialized:');
-    logDebug('  baseUrl: $baseUrl');
-    logDebug('  appId: $appId');
-    logDebug('  redirectUri: $redirectUri');
-    logDebug('  userId: $userId');
-    logDebug('  projectId: $projectId');
-    logDebug('  loadFromStorage: $loadFromStorage');
-    logDebug('  baseUrl explicitly provided: $_baseUrlExplicitlyProvided');
+    logDebug(
+      'WhoopProvider init: appId=$appId loadFromStorage=$loadFromStorage',
+    );
     if (loadFromStorage) {
       _loadFromStorage();
     }
-    logDebug(
-      '✅ WhoopProvider ready - final baseUrl: ${this.baseUrl}, appId: ${this.appId}',
-    );
   }
 
   /// Load configuration and userId from local storage
   Future<void> _loadFromStorage() async {
     try {
-      logDebug('💾 [STORAGE] Loading configuration from storage...');
       final prefs = await SharedPreferences.getInstance();
 
       // Load configuration
@@ -86,52 +77,34 @@ class WhoopProvider {
       final savedProjectId = prefs.getString(_projectIdKey);
       final savedRedirectUri = prefs.getString(_redirectUriKey);
 
-      logDebug('💾 [STORAGE] Loaded from storage:');
-      logDebug('  savedBaseUrl: $savedBaseUrl');
-      logDebug('  savedAppId: $savedAppId');
-      logDebug('  savedRedirectUri: $savedRedirectUri');
+      if (savedBaseUrl != null && !_baseUrlExplicitlyProvided) {
+        baseUrl = savedBaseUrl;
+      }
+      if (savedAppId != null) appId = savedAppId;
+      if (savedApiKey != null) apiKey = savedApiKey;
+      if (savedProjectId != null) projectId = savedProjectId;
+      if (savedRedirectUri != null) redirectUri = savedRedirectUri;
 
-      if (savedBaseUrl != null) {
-        if (_baseUrlExplicitlyProvided) {
-          logDebug('  ✅ Keeping explicitly provided baseUrl: $baseUrl');
-        } else {
-          baseUrl = savedBaseUrl;
-          logDebug('  ✅ Using saved baseUrl: $baseUrl');
-        }
-      }
-      if (savedAppId != null) {
-        appId = savedAppId;
-        logDebug('  ✅ Using saved appId: $appId');
-      }
-      if (savedApiKey != null) {
-        apiKey = savedApiKey;
-        logDebug('  ✅ Using saved apiKey');
-      }
-      if (savedProjectId != null) {
-        projectId = savedProjectId;
-        logDebug('  ✅ Using saved projectId: $projectId');
-      }
-      if (savedRedirectUri != null) {
-        redirectUri = savedRedirectUri;
-        logDebug('  ✅ Using saved redirectUri: $redirectUri');
-      }
-
-      // Load userId
       final savedUserId = prefs.getString(_userIdKey);
-      logDebug('  savedUserId: $savedUserId');
-      if (savedUserId != null) {
-        userId = savedUserId;
-        logDebug('  ✅ Using saved userId: $userId');
-      }
-      logDebug('✅ [STORAGE] Configuration loaded successfully');
+      if (savedUserId != null) userId = savedUserId;
+
+      logDebug(
+        'WhoopProvider storage loaded: appId=$appId hasUserId=${userId != null}',
+      );
     } catch (e, stackTrace) {
       logError(
-        '⚠️ [STORAGE] Failed to load from storage, using defaults',
+        'WhoopProvider storage load failed, using defaults',
         e,
         stackTrace,
       );
-      // Silently fail - use provided/default values
     }
+  }
+
+  /// Redact a UUID-like identifier to last-4 suffix for logging.
+  static String _redactId(String? id) {
+    if (id == null || id.isEmpty) return '<none>';
+    if (id.length <= 4) return '****';
+    return '****${id.substring(id.length - 4)}';
   }
 
   /// Save userId to local storage
@@ -258,10 +231,10 @@ class WhoopProvider {
   /// redirects to platform-configured return URL; app calls [markConnected] when it receives success.
   Future<Map<String, String>> initiateOAuthConnection({String? userId}) async {
     final effectiveUserId = userId ?? this.userId;
-    logWarning('🔐 [AUTH] Starting initiateOAuthConnection (WHOOP)');
-    logDebug('  baseUrl: $baseUrl _apiBase: $_apiBase');
-    logDebug('  appId: $appId');
-    logDebug('  userId: $effectiveUserId');
+    logDebug(
+      '[AUTH] WHOOP initiateOAuthConnection: appId=$appId '
+      'user=${_redactId(effectiveUserId)}',
+    );
 
     final serviceUrl = Uri.parse('$_apiBase/auth/connect/whoop');
 
@@ -276,9 +249,6 @@ class WhoopProvider {
         'redirect_uri': redirectUri,
     };
 
-    logWarning('📡 [AUTH] POST to: $serviceUrl');
-    logDebug('📤 [AUTH] Request body: $requestBody');
-
     try {
       final response = await http.post(
         serviceUrl,
@@ -286,13 +256,13 @@ class WhoopProvider {
         body: jsonEncode(requestBody),
       );
 
-      logWarning('📥 [AUTH] Response status: ${response.statusCode}');
-      logDebug('📥 [AUTH] Response headers: ${response.headers}');
-      logWarning('📥 [AUTH] Response body: ${response.body}');
-
       if (response.statusCode != 200) {
+        final snippet = response.body.length > 500
+            ? '${response.body.substring(0, 500)}…'
+            : response.body;
         logError(
-          '❌ [AUTH] Failed to initiate WHOOP OAuth connection',
+          '[AUTH] WHOOP initiate failed: status=${response.statusCode} '
+          'body=$snippet',
           Exception('Status ${response.statusCode}'),
           StackTrace.current,
         );
@@ -302,14 +272,13 @@ class WhoopProvider {
       }
 
       final json = jsonDecode(response.body);
-      logDebug('📋 [AUTH] Parsed JSON response: $json');
 
       final String? authorizationUrl = json['authorization_url'] as String?;
       final String? state = json['state'] as String?;
 
       if (authorizationUrl == null || authorizationUrl.isEmpty) {
         logError(
-          '❌ [AUTH] authorization_url is missing in response',
+          '[AUTH] WHOOP initiate: authorization_url missing in response',
           Exception('Empty authorization_url'),
           StackTrace.current,
         );
@@ -318,19 +287,17 @@ class WhoopProvider {
 
       if (state == null || state.isEmpty) {
         logError(
-          '❌ [AUTH] state is missing in response',
+          '[AUTH] WHOOP initiate: state missing in response',
           Exception('Empty state'),
           StackTrace.current,
         );
         throw Exception('state is missing in response');
       }
 
-      logWarning(
-        '✅ [AUTH] Successfully obtained WHOOP authorization URL and state',
-      );
+      logDebug('[AUTH] WHOOP initiate ok: state=${_redactId(state)}');
       return {'authorization_url': authorizationUrl, 'state': state};
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in initiateOAuthConnection: $e', e, stackTrace);
+      logError('[AUTH] WHOOP initiateOAuthConnection error', e, stackTrace);
       rethrow;
     }
   }
@@ -338,43 +305,29 @@ class WhoopProvider {
   /// Start OAuth flow: initiate connection, get URL, and launch browser.
   /// [userId] optional; passed to POST /auth/connect/whoop.
   Future<String> startOAuthFlow({String? userId}) async {
-    logWarning('🚀 [AUTH] Starting OAuth flow (WHOOP)');
-
     try {
       final result = await initiateOAuthConnection(userId: userId);
       final authorizationUrl = result['authorization_url']!;
       final state = result['state']!;
-
-      logWarning(
-        '🌐 [AUTH] Obtained WHOOP URL, attempting to launch browser...',
-      );
-      logWarning('  URL: $authorizationUrl');
-      logWarning(
-        '  State: ${state.substring(0, state.length > 30 ? 30 : state.length)}...',
-      );
 
       final launched = await launchUrl(
         Uri.parse(authorizationUrl),
         mode: LaunchMode.externalApplication,
       );
 
-      logWarning('📱 [AUTH] Browser launch result: $launched');
-
       if (!launched) {
         logError(
-          '❌ [AUTH] Cannot open browser',
+          '[AUTH] WHOOP browser launch failed',
           Exception('Browser launch failed'),
           StackTrace.current,
         );
         throw Exception('Cannot open browser');
       }
 
-      logWarning(
-        '✅ [AUTH] OAuth flow started successfully, state: ${state.substring(0, 30)}...',
-      );
+      logDebug('[AUTH] WHOOP OAuth flow started: state=${_redactId(state)}');
       return state;
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in startOAuthFlow: $e', e, stackTrace);
+      logError('[AUTH] WHOOP startOAuthFlow error', e, stackTrace);
       rethrow;
     }
   }
@@ -384,13 +337,12 @@ class WhoopProvider {
   /// Returns state string. After user completes login, wear service redirects to return URL;
   /// app parses deep link and calls [markConnected(userId)] or [handleDeepLinkCallback(uri)].
   Future<String> connect([dynamic context, String? userId]) async {
-    logDebug('🔌 [AUTH] connect() called');
     try {
       final state = await startOAuthFlow(userId: userId);
-      logDebug('✅ [AUTH] connect() completed, state: $state');
+      logDebug('[AUTH] WHOOP connect ok: state=${_redactId(state)}');
       return state;
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in connect(): $e', e, stackTrace);
+      logError('[AUTH] WHOOP connect error', e, stackTrace);
       rethrow;
     }
   }
@@ -399,9 +351,6 @@ class WhoopProvider {
   /// Wear service redirects to platform-configured return URL with success and user_id.
   /// Supports ?status=success&user_id=xxx or ?success=true&user_id=xxx.
   Future<String?> handleDeepLinkCallback(Uri uri) async {
-    logWarning('🔄 [AUTH] Handling deep link callback (WHOOP)');
-    logWarning('  URI: $uri');
-
     final status = uri.queryParameters['status'];
     final success = uri.queryParameters['success'];
     final userID = uri.queryParameters['user_id'];
@@ -409,20 +358,16 @@ class WhoopProvider {
 
     final isSuccess = status == 'success' || success == 'true';
 
-    logWarning(
-      '🔍 [AUTH] Callback parameters: status=$status success=$success userID=$userID error=$error',
+    logDebug(
+      '[AUTH] WHOOP deep link: status=$status success=$success '
+      'user=${_redactId(userID)} error=$error',
     );
 
     if (isSuccess && userID != null && userID.isNotEmpty) {
-      logWarning('✅ [AUTH] Connection successful, saving userId: $userID');
       await saveUserId(userID);
-      logWarning('💾 [AUTH] userId saved successfully');
 
       // Validate data freshness after connection
       try {
-        logDebug(
-          '🔍 [AUTH] Validating data freshness after WHOOP connection...',
-        );
         final testData = await _fetch(
           'recovery',
           userID,
@@ -432,29 +377,28 @@ class WhoopProvider {
           null,
         );
         _validateDataFreshness(testData, 'WHOOP connection');
-        logDebug('✅ [AUTH] WHOOP connection validated: Data is fresh');
       } catch (e, stackTrace) {
-        logWarning('⚠️ [AUTH] WHOOP connection data validation failed: $e');
-        logError('⚠️ [AUTH] Validation error details', e, stackTrace);
         // Don't fail connection if validation fails, just log warning
+        logWarning('[AUTH] WHOOP post-connect freshness check failed: $e');
+        logError('[AUTH] WHOOP validation error details', e, stackTrace);
       }
 
-      logWarning(
-        '✅ [AUTH] handleDeepLinkCallback completed successfully, userId: $userID',
+      logDebug(
+        '[AUTH] WHOOP handleDeepLinkCallback ok: user=${_redactId(userID)}',
       );
       return userID;
     } else if (status == 'error' || error != null) {
       // Connection failed
       final errorMessage = error ?? 'Unknown error';
       logError(
-        '❌ [AUTH] OAuth callback failed: $errorMessage',
+        '[AUTH] WHOOP OAuth callback failed: $errorMessage',
         Exception(errorMessage),
         StackTrace.current,
       );
       throw Exception('OAuth callback failed: $errorMessage');
     }
 
-    logWarning('⚠️ [AUTH] Callback missing status/userID or error');
+    logWarning('[AUTH] WHOOP callback missing status/userID or error');
     return null;
   }
 
@@ -744,10 +688,32 @@ class WhoopProvider {
     final uri = Uri.parse(
       '$_apiBase/whoop/data/$userId/$type',
     ).replace(queryParameters: params);
-    logDebug('WHOOP data request URI: $uri');
+    // INFO-safe: redact user UUID and never log full URL/query (PII +
+    // tokens). Full URI is available at debug level when needed.
+    logDebug(
+      'WHOOP data fetch: type=$type user=${_redactId(userId)} '
+      'limit=$limit hasCursor=${cursor != null && cursor.isNotEmpty}',
+    );
     final res = await http.get(uri, headers: _authHeaders());
-    logDebug('WHOOP data response: ${res.body}');
-    if (res.statusCode != 200) throw Exception(res.body);
+    // Full response bodies are third-party PII (sleep stages, HR samples)
+    // and routinely tens of KB; never log at INFO. Surface status + size
+    // only — re-run with a local print if you need the payload.
+    logDebug(
+      'WHOOP data response: type=$type status=${res.statusCode} '
+      'bytes=${res.bodyBytes.length}',
+    );
+    if (res.statusCode != 200) {
+      // Errors get a truncated body so we can debug without dumping
+      // megabytes into the log on a 5xx loop.
+      final snippet = res.body.length > 500
+          ? '${res.body.substring(0, 500)}…'
+          : res.body;
+      logWarning(
+        'WHOOP data fetch failed: type=$type status=${res.statusCode} '
+        'body=$snippet',
+      );
+      throw Exception(res.body);
+    }
     final data = jsonDecode(res.body);
 
     // Validate data freshness
@@ -1092,7 +1058,7 @@ class WhoopProvider {
     final latestTimestamp = _extractLatestTimestamp(response);
 
     if (latestTimestamp == null) {
-      logWarning('⚠️ $context: Could not extract timestamp from response');
+      logWarning('$context: could not extract timestamp from response');
       return; // Don't fail if we can't extract timestamp
     }
 
@@ -1107,17 +1073,18 @@ class WhoopProvider {
       final errorMessage =
           'WHOOP data is stale (${absoluteAge.inHours} hours old). '
           'Please check if your wearable device is connected to get latest data.';
-      logWarning('❌ $context: $errorMessage');
+      logWarning('$context: $errorMessage');
       throw Exception(errorMessage);
     }
 
     if (isFutureData) {
-      logWarning(
-        '⏰ $context: Data timestamp is ${absoluteAge.inHours} hours in the future (likely timezone difference) - treating as valid',
+      logDebug(
+        '$context: data timestamp ${absoluteAge.inHours}h in the future '
+        '(likely timezone) - treating as valid',
       );
     } else {
-      logWarning(
-        '✅ $context: Data is fresh (${absoluteAge.inHours} hours old)',
+      logDebug(
+        '$context: data is fresh (${absoluteAge.inHours}h old)',
       );
     }
   }

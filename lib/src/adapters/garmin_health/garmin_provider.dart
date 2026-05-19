@@ -61,26 +61,17 @@ class GarminProvider {
        projectId = projectId,
        redirectUri = redirectUri ?? defaultRedirectUri,
        _baseUrlExplicitlyProvided = baseUrl != null {
-    logDebug('🔧 GarminProvider initialized:');
-    logDebug('  baseUrl: $baseUrl');
-    logDebug('  appId: $appId');
-    logDebug('  redirectUri: $redirectUri');
-    logDebug('  userId: $userId');
-    logDebug('  projectId: $projectId');
-    logDebug('  loadFromStorage: $loadFromStorage');
-    logDebug('  baseUrl explicitly provided: $_baseUrlExplicitlyProvided');
+    logDebug(
+      'GarminProvider init: appId=$appId loadFromStorage=$loadFromStorage',
+    );
     if (loadFromStorage) {
       _loadFromStorage();
     }
-    logDebug(
-      '✅ GarminProvider ready - final baseUrl: ${this.baseUrl}, appId: ${this.appId}',
-    );
   }
 
   /// Load configuration and userId from local storage
   Future<void> _loadFromStorage() async {
     try {
-      logDebug('💾 [STORAGE] Loading configuration from storage...');
       final prefs = await SharedPreferences.getInstance();
 
       // Load configuration
@@ -90,52 +81,34 @@ class GarminProvider {
       final savedProjectId = prefs.getString(_projectIdKey);
       final savedRedirectUri = prefs.getString(_redirectUriKey);
 
-      logDebug('💾 [STORAGE] Loaded from storage:');
-      logDebug('  savedBaseUrl: $savedBaseUrl');
-      logDebug('  savedAppId: $savedAppId');
-      logDebug('  savedRedirectUri: $savedRedirectUri');
+      if (savedBaseUrl != null && !_baseUrlExplicitlyProvided) {
+        baseUrl = savedBaseUrl;
+      }
+      if (savedAppId != null) appId = savedAppId;
+      if (savedApiKey != null) apiKey = savedApiKey;
+      if (savedProjectId != null) projectId = savedProjectId;
+      if (savedRedirectUri != null) redirectUri = savedRedirectUri;
 
-      if (savedBaseUrl != null) {
-        if (_baseUrlExplicitlyProvided) {
-          logDebug('  ✅ Keeping explicitly provided baseUrl: $baseUrl');
-        } else {
-          baseUrl = savedBaseUrl;
-          logDebug('  ✅ Using saved baseUrl: $baseUrl');
-        }
-      }
-      if (savedAppId != null) {
-        appId = savedAppId;
-        logDebug('  ✅ Using saved appId: $appId');
-      }
-      if (savedApiKey != null) {
-        apiKey = savedApiKey;
-        logDebug('  ✅ Using saved apiKey');
-      }
-      if (savedProjectId != null) {
-        projectId = savedProjectId;
-        logDebug('  ✅ Using saved projectId: $projectId');
-      }
-      if (savedRedirectUri != null) {
-        redirectUri = savedRedirectUri;
-        logDebug('  ✅ Using saved redirectUri: $redirectUri');
-      }
-
-      // Load userId
       final savedUserId = prefs.getString(_userIdKey);
-      logDebug('  savedUserId: $savedUserId');
-      if (savedUserId != null) {
-        userId = savedUserId;
-        logDebug('  ✅ Using saved userId: $userId');
-      }
-      logDebug('✅ [STORAGE] Configuration loaded successfully');
+      if (savedUserId != null) userId = savedUserId;
+
+      logDebug(
+        'GarminProvider storage loaded: appId=$appId hasUserId=${userId != null}',
+      );
     } catch (e, stackTrace) {
       logError(
-        '⚠️ [STORAGE] Failed to load from storage, using defaults',
+        'GarminProvider storage load failed, using defaults',
         e,
         stackTrace,
       );
-      // Silently fail - use provided/default values
     }
+  }
+
+  /// Redact a UUID-like identifier to last-4 suffix for logging.
+  static String _redactId(String? id) {
+    if (id == null || id.isEmpty) return '<none>';
+    if (id.length <= 4) return '****';
+    return '****${id.substring(id.length - 4)}';
   }
 
   /// Save userId to local storage
@@ -260,10 +233,10 @@ class GarminProvider {
   /// Returns authorization_url and state. Callback handled by wear service; app calls [markConnected] on return URL success.
   Future<Map<String, String>> initiateOAuthConnection({String? userId}) async {
     final effectiveUserId = userId ?? this.userId;
-    logWarning('🔐 [AUTH] Starting initiateOAuthConnection (Garmin)');
-    logDebug('  baseUrl: $baseUrl _apiBase: $_apiBase');
-    logDebug('  appId: $appId');
-    logDebug('  userId: $effectiveUserId');
+    logDebug(
+      '[AUTH] Garmin initiateOAuthConnection: appId=$appId '
+      'user=${_redactId(effectiveUserId)}',
+    );
 
     final serviceUrl = Uri.parse('$_apiBase/auth/connect/garmin');
 
@@ -278,9 +251,6 @@ class GarminProvider {
         'redirect_uri': redirectUri,
     };
 
-    logWarning('📡 [AUTH] POST to: $serviceUrl');
-    logDebug('📤 [AUTH] Request body: $requestBody');
-
     try {
       final response = await http.post(
         serviceUrl,
@@ -288,13 +258,13 @@ class GarminProvider {
         body: jsonEncode(requestBody),
       );
 
-      logWarning('📥 [AUTH] Response status: ${response.statusCode}');
-      logDebug('📥 [AUTH] Response headers: ${response.headers}');
-      logWarning('📥 [AUTH] Response body: ${response.body}');
-
       if (response.statusCode != 200) {
+        final snippet = response.body.length > 500
+            ? '${response.body.substring(0, 500)}…'
+            : response.body;
         logError(
-          '❌ [AUTH] Failed to initiate Garmin OAuth connection',
+          '[AUTH] Garmin initiate failed: status=${response.statusCode} '
+          'body=$snippet',
           Exception('Status ${response.statusCode}'),
           StackTrace.current,
         );
@@ -304,14 +274,13 @@ class GarminProvider {
       }
 
       final json = jsonDecode(response.body);
-      logDebug('📋 [AUTH] Parsed JSON response: $json');
 
       final String? authorizationUrl = json['authorization_url'] as String?;
       final String? state = json['state'] as String?;
 
       if (authorizationUrl == null || authorizationUrl.isEmpty) {
         logError(
-          '❌ [AUTH] authorization_url is missing in response',
+          '[AUTH] Garmin initiate: authorization_url missing in response',
           Exception('Empty authorization_url'),
           StackTrace.current,
         );
@@ -320,19 +289,17 @@ class GarminProvider {
 
       if (state == null || state.isEmpty) {
         logError(
-          '❌ [AUTH] state is missing in response',
+          '[AUTH] Garmin initiate: state missing in response',
           Exception('Empty state'),
           StackTrace.current,
         );
         throw Exception('state is missing in response');
       }
 
-      logWarning(
-        '✅ [AUTH] Successfully obtained Garmin authorization URL and state',
-      );
+      logDebug('[AUTH] Garmin initiate ok: state=${_redactId(state)}');
       return {'authorization_url': authorizationUrl, 'state': state};
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in initiateOAuthConnection: $e', e, stackTrace);
+      logError('[AUTH] Garmin initiateOAuthConnection error', e, stackTrace);
       rethrow;
     }
   }
@@ -340,43 +307,29 @@ class GarminProvider {
   /// Start OAuth flow: initiate connection, get URL, and launch browser.
   /// [userId] optional; passed to POST /auth/connect/garmin.
   Future<Map<String, String>> startOAuthFlow({String? userId}) async {
-    logWarning('🚀 [AUTH] Starting OAuth flow (Garmin)');
-
     try {
       final result = await initiateOAuthConnection(userId: userId);
       final authorizationUrl = result['authorization_url']!;
       final state = result['state']!;
-
-      logWarning(
-        '🌐 [AUTH] Obtained Garmin URL, attempting to launch browser...',
-      );
-      logWarning('  URL: $authorizationUrl');
-      logWarning(
-        '  State: ${state.substring(0, state.length > 30 ? 30 : state.length)}...',
-      );
 
       final launched = await launchUrl(
         Uri.parse(authorizationUrl),
         mode: LaunchMode.externalApplication,
       );
 
-      logWarning('📱 [AUTH] Browser launch result: $launched');
-
       if (!launched) {
         logError(
-          '❌ [AUTH] Cannot open browser',
+          '[AUTH] Garmin browser launch failed',
           Exception('Browser launch failed'),
           StackTrace.current,
         );
         throw Exception('Cannot open browser');
       }
 
-      logWarning(
-        '✅ [AUTH] OAuth flow started successfully, state: ${state.substring(0, 30)}...',
-      );
+      logDebug('[AUTH] Garmin OAuth flow started: state=${_redactId(state)}');
       return result;
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in startOAuthFlow: $e', e, stackTrace);
+      logError('[AUTH] Garmin startOAuthFlow error', e, stackTrace);
       rethrow;
     }
   }
@@ -384,9 +337,6 @@ class GarminProvider {
   /// Handle return URL deep link after Managed OAuth v2.
   /// Supports ?status=success&user_id=xxx or ?success=true&user_id=xxx.
   Future<String?> handleDeepLinkCallback(Uri uri) async {
-    logWarning('🔄 [AUTH] Handling deep link callback (Garmin)');
-    logWarning('  URI: $uri');
-
     final status = uri.queryParameters['status'];
     final success = uri.queryParameters['success'];
     final userID = uri.queryParameters['user_id'];
@@ -394,14 +344,13 @@ class GarminProvider {
 
     final isSuccess = status == 'success' || success == 'true';
 
-    logWarning(
-      '🔍 [AUTH] Callback parameters: status=$status success=$success userID=$userID error=$error',
+    logDebug(
+      '[AUTH] Garmin deep link: status=$status success=$success '
+      'user=${_redactId(userID)} error=$error',
     );
 
     if (isSuccess && userID != null && userID.isNotEmpty) {
-      logWarning('✅ [AUTH] Connection successful, saving userId: $userID');
       await saveUserId(userID);
-      logWarning('💾 [AUTH] userId saved successfully');
 
       // No post-connect data fetch: Garmin Health pull endpoints
       // (/dailies, /sleep, /activities) require pull tokens issued
@@ -411,22 +360,22 @@ class GarminProvider {
       // arrives over the next few minutes through the webhook
       // pipeline.
 
-      logWarning(
-        '✅ [AUTH] handleDeepLinkCallback completed successfully, userId: $userID',
+      logDebug(
+        '[AUTH] Garmin handleDeepLinkCallback ok: user=${_redactId(userID)}',
       );
       return userID;
     } else if (status == 'error' || error != null) {
       // Connection failed
       final errorMessage = error ?? 'Unknown error';
       logError(
-        '❌ [AUTH] OAuth callback failed: $errorMessage',
+        '[AUTH] Garmin OAuth callback failed: $errorMessage',
         Exception(errorMessage),
         StackTrace.current,
       );
       throw Exception('OAuth callback failed: $errorMessage');
     }
 
-    logWarning('⚠️ [AUTH] Callback missing status/userID or error');
+    logWarning('[AUTH] Garmin callback missing status/userID or error');
     return null;
   }
 
@@ -443,17 +392,14 @@ class GarminProvider {
   /// Connect: initiates Managed OAuth v2, returns auth URL (opens browser).
   /// [userId] optional. After login, wear service redirects to return URL; app calls [markConnected(userId)] or [handleDeepLinkCallback(uri)].
   Future<String> connect([dynamic context, String? userId]) async {
-    logWarning('🔌 [AUTH] connect() called (Garmin)');
     try {
       final result = await startOAuthFlow(userId: userId);
       final state = result['state'] ?? '';
-      logWarning(
-        '✅ [AUTH] connect() completed, state: ${state.substring(0, state.length > 30 ? 30 : state.length)}...',
-      );
+      logDebug('[AUTH] Garmin connect ok: state=${_redactId(state)}');
       // Return the state - the actual user_id will come from deep link callback
       return state;
     } catch (e, stackTrace) {
-      logError('❌ [AUTH] Error in connect(): $e', e, stackTrace);
+      logError('[AUTH] Garmin connect error', e, stackTrace);
       rethrow;
     }
   }
@@ -469,10 +415,10 @@ class GarminProvider {
     DateTime? start,
     DateTime? end,
   ) async {
-    logWarning('📊 [DATA] Fetching Garmin $summaryType data');
-    logWarning('  userId: $userId');
-    logWarning('  start: $start');
-    logWarning('  end: $end');
+    logDebug(
+      '[DATA] Garmin fetch: type=$summaryType user=${_redactId(userId)} '
+      'start=$start end=$end',
+    );
 
     final params = <String, String>{
       'app_id': appId,
@@ -485,24 +431,23 @@ class GarminProvider {
       '$_apiBase/garmin/data/$userId/$summaryType',
     ).replace(queryParameters: params);
 
-    // Always print URI for debugging (even if debug logs are disabled)
-    debugPrint('📡 [Garmin] Request URI: $uri');
-    logWarning('📡 [DATA] Request URI: $uri');
     try {
       final res = await http.get(uri, headers: _authHeaders());
-      logWarning('📥 [DATA] Response status: ${res.statusCode}');
-      if (res.statusCode == 200) {
-        final bodyPreview = res.body.length > 500
-            ? '${res.body.substring(0, 500)}...'
-            : res.body;
-        logWarning('📥 [DATA] Response body preview: $bodyPreview');
-      } else {
-        logWarning('📥 [DATA] Response body: ${res.body}');
-      }
+      // Full response bodies (sleep/HR samples) are PII and routinely large;
+      // never log at INFO. Status + size only — re-run with a local print
+      // if you need the payload.
+      logDebug(
+        '[DATA] Garmin response: type=$summaryType '
+        'status=${res.statusCode} bytes=${res.bodyBytes.length}',
+      );
 
       if (res.statusCode != 200) {
+        final snippet = res.body.length > 500
+            ? '${res.body.substring(0, 500)}…'
+            : res.body;
         logError(
-          '❌ [DATA] Failed to fetch Garmin $summaryType',
+          '[DATA] Garmin fetch failed: type=$summaryType '
+          'status=${res.statusCode} body=$snippet',
           Exception('Status ${res.statusCode}'),
           StackTrace.current,
         );
@@ -512,7 +457,7 @@ class GarminProvider {
             'Failed to fetch Garmin $summaryType (${res.statusCode}): ${res.body}';
         if (res.statusCode == 404) {
           errorMessage +=
-              '\n\n💡 Tip: Garmin data may need to be synced first. '
+              '\nTip: Garmin data may need to be synced first. '
               'Try requesting a backfill for $summaryType before fetching data.';
         }
 
@@ -524,11 +469,11 @@ class GarminProvider {
       // Validate data freshness
       _validateDataFreshness(data, 'Garmin $summaryType fetch');
 
-      logWarning('✅ [DATA] Successfully fetched Garmin $summaryType data');
+      logDebug('[DATA] Garmin fetch ok: type=$summaryType');
       return data;
     } catch (e, stackTrace) {
       logError(
-        '❌ [DATA] Error fetching Garmin $summaryType: $e',
+        '[DATA] Garmin fetch error: type=$summaryType',
         e,
         stackTrace,
       );
@@ -841,7 +786,7 @@ class GarminProvider {
     final latestTimestamp = _extractLatestTimestamp(response);
 
     if (latestTimestamp == null) {
-      logWarning('⚠️ $context: Could not extract timestamp from response');
+      logWarning('$context: could not extract timestamp from response');
       return; // Don't fail if we can't extract timestamp
     }
 
@@ -856,17 +801,18 @@ class GarminProvider {
       final errorMessage =
           'Garmin data is stale (${absoluteAge.inHours} hours old). '
           'Please check if your wearable device is connected to get latest data.';
-      logWarning('❌ $context: $errorMessage');
+      logWarning('$context: $errorMessage');
       throw Exception(errorMessage);
     }
 
     if (isFutureData) {
-      logWarning(
-        '⏰ $context: Data timestamp is ${absoluteAge.inHours} hours in the future (likely timezone difference) - treating as valid',
+      logDebug(
+        '$context: data timestamp ${absoluteAge.inHours}h in the future '
+        '(likely timezone) - treating as valid',
       );
     } else {
-      logWarning(
-        '✅ $context: Data is fresh (${absoluteAge.inHours} hours old)',
+      logDebug(
+        '$context: data is fresh (${absoluteAge.inHours}h old)',
       );
     }
   }
@@ -1257,8 +1203,10 @@ class GarminProvider {
       'end_time': end.toUtc().toIso8601String(),
     };
 
-    logWarning('📡 [BACKFILL] Request URI: $uri');
-    logWarning('📡 [BACKFILL] Request body: ${jsonEncode(requestBody)}');
+    logDebug(
+      '[BACKFILL] Garmin request: type=$summaryType '
+      'start=$start end=$end',
+    );
 
     final res = await http.post(
       uri,
@@ -1266,8 +1214,10 @@ class GarminProvider {
       body: jsonEncode(requestBody),
     );
 
-    logWarning('📥 [BACKFILL] Response status: ${res.statusCode}');
-    logWarning('📥 [BACKFILL] Response body: ${res.body}');
+    logDebug(
+      '[BACKFILL] Garmin response: type=$summaryType '
+      'status=${res.statusCode} bytes=${res.bodyBytes.length}',
+    );
 
     if (res.statusCode != 202) {
       final errorBody = res.body;
@@ -1285,7 +1235,7 @@ class GarminProvider {
               '  3. Or disconnect and reconnect Garmin to refresh tokens\n\n'
               'Error details: $errorBody';
           logWarning(
-            '⚠️ [BACKFILL] Connection tokens not available - this is a backend timing issue',
+            '[BACKFILL] Garmin connection tokens not available - this is a backend timing issue',
           );
         } else if (errorBody.contains('timestamp must be positive')) {
           errorMessage =
