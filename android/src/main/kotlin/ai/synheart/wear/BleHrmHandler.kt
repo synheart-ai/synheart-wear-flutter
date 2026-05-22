@@ -214,11 +214,24 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         }
 
         val gattCallback = object : BluetoothGattCallback() {
+            // Flutter's MethodChannel.Result can only be replied to ONCE.
+            // onConnectionStateChange fires repeatedly across a device's
+            // lifetime (every subsequent disconnect, status update after
+            // the initial connect was already acknowledged), so guard the
+            // reply — secondary callbacks would otherwise crash the process
+            // with java.lang.IllegalStateException: Reply already submitted.
+            private var resultSubmitted = false
+            private fun replyOnce(action: (MethodChannel.Result) -> Unit) {
+                if (resultSubmitted) return
+                resultSubmitted = true
+                mainHandler.post { action(result) }
+            }
+
             override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     connectedGatt = gatt
                     reconnectAttempts = 0
-                    mainHandler.post { result.success(null) }
+                    replyOnce { it.success(null) }
                     try {
                         gatt.discoverServices()
                     } catch (_: SecurityException) {}
@@ -231,8 +244,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                         // Auto-reconnect if we were streaming and got disconnected
                         scheduleReconnect()
                     } else if (!wasConnected) {
-                        mainHandler.post {
-                            result.error("SUBSCRIBE_FAILED", "Connection failed (status=$status)", null)
+                        replyOnce {
+                            it.error("SUBSCRIBE_FAILED", "Connection failed (status=$status)", null)
                         }
                     }
                 }
