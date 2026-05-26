@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-26
+
+### Fixed
+- iOS: BLE HRM auto-reconnect on cold start no longer fails with
+  `DEVICE_NOT_FOUND`. `BleHrmHandler.connect(deviceId:)` used to rely
+  on an optional chain over `CBCentralManager`, which is `nil` on the
+  first BLE call after a process launch — `retrievePeripherals` and
+  `retrieveConnectedPeripherals` then returned nothing and the connect
+  short-circuited before the radio came up. The fix mirrors what
+  `scan()` already does: lazily instantiate the central manager, and
+  if the state is still `.unknown` / `.resetting`, stash the request
+  in a new `pendingConnect` slot and finish it from
+  `centralManagerDidUpdateState` once `.poweredOn` is reached. On
+  `.poweredOff` / `.unauthorized` the pending request is failed with
+  the same error codes the scan path already returns. Hosts that
+  drive auto-reconnect via `BleHrmService.ensureConnected()` at app
+  startup now reconnect to a previously paired strap without a manual
+  "Re-scan" tap.
+
 ## [0.4.2] - 2026-05-19
 
 ### Changed
