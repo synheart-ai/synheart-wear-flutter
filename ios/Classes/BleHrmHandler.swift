@@ -20,6 +20,20 @@ public class BleHrmHandler: NSObject {
     private var scanTimer: Timer?
     private var sessionId: String?
 
+    /// Deferred connect request, held when `connect()` is invoked before
+    /// `CBCentralManager` has finished initializing. Resolved when the
+    /// state machine reaches `.poweredOn` (or fails with a clear error
+    /// on `.poweredOff` / `.unauthorized`). Without this, the first
+    /// auto-reconnect attempt after a cold launch would always fail
+    /// with `DEVICE_NOT_FOUND` — the manager was nil so
+    /// `retrievePeripherals` returned nil.
+    private struct PendingConnect {
+        let deviceId: String
+        let sessionId: String?
+        let result: FlutterResult
+    }
+    private var pendingConnect: PendingConnect?
+
     // Standard BLE Heart Rate Service UUID
     private let heartRateServiceUUID = CBUUID(string: "180D")
     // Heart Rate Measurement Characteristic UUID
@@ -178,6 +192,47 @@ public class BleHrmHandler: NSObject {
     private func connect(deviceId: String, sessionId: String?, result: @escaping FlutterResult) {
         self.sessionId = sessionId
 
+        guard UUID(uuidString: deviceId) != nil else {
+            result(FlutterError(code: "DEVICE_NOT_FOUND", message: "Invalid device ID", details: nil))
+            return
+        }
+
+        // Lazily initialise the central manager — required for the
+        // auto-reconnect path the Dart side fires at app startup, where
+        // this is the first BLE call and `centralManager` has never
+        // been created yet. Mirrors what `scan()` does for the same
+        // reason.
+        if centralManager == nil {
+            centralManager = CBCentralManager(delegate: self, queue: nil)
+        }
+
+        // Manager may still be in `.unknown` / `.resetting` — typical
+        // on cold start. Stash the request and let
+        // `centralManagerDidUpdateState` finish it once the radio is
+        // `.poweredOn`. Without this, the cold-start auto-reconnect
+        // always failed with `DEVICE_NOT_FOUND` because
+        // `retrievePeripherals` on a not-yet-powered manager returns
+        // nothing.
+        guard centralManager?.state == .poweredOn else {
+            if centralManager?.state == .poweredOff {
+                result(FlutterError(code: "BLUETOOTH_OFF", message: "Bluetooth is turned off", details: nil))
+                return
+            }
+            if centralManager?.state == .unauthorized {
+                result(FlutterError(code: "PERMISSION_DENIED", message: "Bluetooth permission denied", details: nil))
+                return
+            }
+            // .unknown / .resetting — wait for the next state update.
+            pendingConnect = PendingConnect(deviceId: deviceId, sessionId: sessionId, result: result)
+            return
+        }
+
+        performConnect(deviceId: deviceId, result: result)
+    }
+
+    /// Actually look up the peripheral by UUID and request a connection.
+    /// Caller must ensure `centralManager` is initialised and powered on.
+    private func performConnect(deviceId: String, result: @escaping FlutterResult) {
         guard let uuid = UUID(uuidString: deviceId) else {
             result(FlutterError(code: "DEVICE_NOT_FOUND", message: "Invalid device ID", details: nil))
             return
@@ -267,16 +322,31 @@ extension BleHrmHandler: CBCentralManagerDelegate {
                     self?.finishScan(namePrefix: nil)
                 }
             }
+            // If we have a pending connect (cold-start auto-reconnect),
+            // finish it now that the radio is ready.
+            if let pending = pendingConnect {
+                pendingConnect = nil
+                self.sessionId = pending.sessionId
+                performConnect(deviceId: pending.deviceId, result: pending.result)
+            }
         case .poweredOff:
             permissionResult?("denied")
             permissionResult = nil
             scanResult?(FlutterError(code: "BLUETOOTH_OFF", message: "Bluetooth is turned off", details: nil))
             scanResult = nil
+            if let pending = pendingConnect {
+                pendingConnect = nil
+                pending.result(FlutterError(code: "BLUETOOTH_OFF", message: "Bluetooth is turned off", details: nil))
+            }
         case .unauthorized:
             permissionResult?("denied")
             permissionResult = nil
             scanResult?(FlutterError(code: "PERMISSION_DENIED", message: "Bluetooth permission denied", details: nil))
             scanResult = nil
+            if let pending = pendingConnect {
+                pendingConnect = nil
+                pending.result(FlutterError(code: "PERMISSION_DENIED", message: "Bluetooth permission denied", details: nil))
+            }
         default:
             break
         }
