@@ -34,6 +34,20 @@ public class BleHrmHandler: NSObject {
     }
     private var pendingConnect: PendingConnect?
 
+    /// Mid-session reconnect state. When CoreBluetooth drops a live link
+    /// (interference, brief out-of-range, iOS reclaiming the radio) we keep a
+    /// strong reference to the `CBPeripheral` and ask iOS to reconnect — it
+    /// holds that pending connection indefinitely and reattaches silently when
+    /// the strap is back in range, so HR samples just pause and resume on the
+    /// same event sink. We bound the wait with a give-up timer; only when it
+    /// elapses do we surface `DISCONNECTED` to Dart (which then does a full
+    /// scan+reconnect, and the stall UI takes over). Previously a single drop
+    /// killed the session because nothing re-issued the connect.
+    private var reconnectPeripheral: CBPeripheral?
+    private var reconnectGiveUpTimer: Timer?
+    private var isReconnecting = false
+    private let reconnectGiveUpWindow: TimeInterval = 30.0
+
     // Standard BLE Heart Rate Service UUID
     private let heartRateServiceUUID = CBUUID(string: "180D")
     // Heart Rate Measurement Characteristic UUID
@@ -274,11 +288,29 @@ public class BleHrmHandler: NSObject {
     // MARK: - Disconnect
 
     private func disconnect(result: @escaping FlutterResult) {
+        // Explicit teardown (session end / user "Try again") cancels any
+        // in-flight auto-reconnect — including a pending connect whose
+        // peripheral is no longer the live `connectedPeripheral` — so iOS
+        // doesn't silently reattach afterwards.
+        cancelReconnect(cancelPending: true)
         if let peripheral = connectedPeripheral {
             centralManager?.cancelPeripheralConnection(peripheral)
         }
         connectedPeripheral = nil
         result(nil)
+    }
+
+    /// Tear down auto-reconnect bookkeeping. When `cancelPending` is true the
+    /// pending CoreBluetooth connection is also cancelled (give-up path); on
+    /// explicit disconnect the caller cancels the live peripheral itself.
+    private func cancelReconnect(cancelPending: Bool) {
+        reconnectGiveUpTimer?.invalidate()
+        reconnectGiveUpTimer = nil
+        isReconnecting = false
+        if cancelPending, let p = reconnectPeripheral {
+            centralManager?.cancelPeripheralConnection(p)
+        }
+        reconnectPeripheral = nil
     }
 
     // MARK: - RSSI tracking
@@ -361,6 +393,12 @@ extension BleHrmHandler: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        // Successful auto-reconnect: clear the give-up timer. Re-running service
+        // discovery below re-subscribes the HR notification, so samples resume
+        // on the existing event sink with no Dart-visible error.
+        if isReconnecting && peripheral.identifier == reconnectPeripheral?.identifier {
+            cancelReconnect(cancelPending: false)
+        }
         connectedPeripheral = peripheral
         peripheral.delegate = self
         peripheral.discoverServices([heartRateServiceUUID])
@@ -369,15 +407,46 @@ extension BleHrmHandler: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        // A failed attempt during auto-reconnect isn't terminal — re-issue the
+        // pending connect and let the give-up timer decide when to surface it.
+        if isReconnecting && peripheral.identifier == reconnectPeripheral?.identifier {
+            central.connect(peripheral, options: nil)
+            return
+        }
         connectResult?(FlutterError(code: "SUBSCRIBE_FAILED", message: error?.localizedDescription ?? "Connection failed", details: nil))
         connectResult = nil
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        if peripheral.identifier == connectedPeripheral?.identifier {
-            connectedPeripheral = nil
+        guard peripheral.identifier == connectedPeripheral?.identifier else { return }
+        connectedPeripheral = nil
+
+        // Only attempt transparent reconnect inside an active session and with
+        // the radio up; otherwise fall through to the terminal notification.
+        guard sessionId != nil, central.state == .poweredOn, !isReconnecting else {
             eventSink?(FlutterError(code: "DISCONNECTED", message: "Device disconnected", details: nil))
+            return
         }
+
+        isReconnecting = true
+        reconnectPeripheral = peripheral
+        peripheral.delegate = self
+        central.connect(peripheral, options: nil) // pending connect; reattaches when in range
+        reconnectGiveUpTimer?.invalidate()
+        reconnectGiveUpTimer = Timer.scheduledTimer(
+            withTimeInterval: reconnectGiveUpWindow, repeats: false
+        ) { [weak self] _ in
+            self?.failReconnect()
+        }
+    }
+
+    /// Auto-reconnect window elapsed without the strap coming back. Cancel the
+    /// pending connect and surface a terminal disconnect so Dart can do a full
+    /// scan+reconnect and the stall UI can take over.
+    private func failReconnect() {
+        guard isReconnecting else { return }
+        cancelReconnect(cancelPending: true)
+        eventSink?(FlutterError(code: "DISCONNECTED", message: "Device disconnected", details: nil))
     }
 }
 
