@@ -1,4 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="ai.synheart.wear">
+    <!--
+      Keep-alive foreground service for the generic BLE HRM streaming path
+      (BleHrmHandler). Declared here so any host that uses this plugin picks it
+      up; the host app must grant FOREGROUND_SERVICE / FOREGROUND_SERVICE_DATA_SYNC
+      / POST_NOTIFICATIONS (Life already does). dataSync = sensor data flowing
+      monitor -> phone -> SDK.
+    -->
+    <application>
+        <service
+            android:name="ai.synheart.wear.BleStreamingForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
 </manifest>
-

@@ -231,6 +231,9 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     connectedGatt = gatt
                     reconnectAttempts = 0
+                    // Hold the process up while streaming so backgrounding the
+                    // app doesn't kill the GATT connection.
+                    BleStreamingForegroundController.start(context)
                     replyOnce { it.success(null) }
                     try {
                         gatt.discoverServices()
@@ -306,6 +309,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
 
     private fun scheduleReconnect() {
         if (reconnectAttempts >= maxReconnectAttempts) {
+            // Streaming is truly over — release the keep-alive.
+            BleStreamingForegroundController.stop(context)
             mainHandler.post {
                 eventSink?.error("DISCONNECTED", "Device disconnected after $maxReconnectAttempts reconnect attempts", null)
             }
@@ -326,6 +331,9 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                         if (newState == BluetoothProfile.STATE_CONNECTED) {
                             connectedGatt = gatt
                             reconnectAttempts = 0
+                            // Re-assert the keep-alive (process may have been
+                            // killed and restarted between attempts).
+                            BleStreamingForegroundController.start(context)
                             try { gatt.discoverServices() } catch (_: SecurityException) {}
                         } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                             try { gatt.close() } catch (_: Exception) {}
@@ -387,6 +395,7 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             connectedGatt?.close()
         } catch (_: SecurityException) {}
         connectedGatt = null
+        BleStreamingForegroundController.stop(context)
         result.success(null)
     }
 
