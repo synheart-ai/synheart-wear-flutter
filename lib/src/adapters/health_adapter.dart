@@ -595,6 +595,39 @@ class HealthAdapter {
       if (mins <= 0) continue;
       final key = dayKey(p.dateTo);
       final acc = out.putIfAbsent(key, _SleepAcc.new);
+
+      // Onset-latency anchors: the in-bed window starts at the earliest of any
+      // sleep segment; sleep onset is the earliest non-awake stage. Latency is
+      // the gap between them (computed below).
+      switch (p.type) {
+        case HealthDataType.SLEEP_ASLEEP:
+        case HealthDataType.SLEEP_IN_BED:
+        case HealthDataType.SLEEP_DEEP:
+        case HealthDataType.SLEEP_LIGHT:
+        case HealthDataType.SLEEP_REM:
+        case HealthDataType.SLEEP_AWAKE:
+          if (acc.inBedStart == null || p.dateFrom.isBefore(acc.inBedStart!)) {
+            acc.inBedStart = p.dateFrom;
+          }
+          break;
+        default:
+          break;
+      }
+      switch (p.type) {
+        // SLEEP_IN_BED is "in bed", not asleep — it anchors in-bed only.
+        case HealthDataType.SLEEP_ASLEEP:
+        case HealthDataType.SLEEP_DEEP:
+        case HealthDataType.SLEEP_LIGHT:
+        case HealthDataType.SLEEP_REM:
+          if (acc.firstSleepStart == null ||
+              p.dateFrom.isBefore(acc.firstSleepStart!)) {
+            acc.firstSleepStart = p.dateFrom;
+          }
+          break;
+        default:
+          break;
+      }
+
       switch (p.type) {
         case HealthDataType.SLEEP_ASLEEP:
         case HealthDataType.SLEEP_IN_BED:
@@ -620,6 +653,14 @@ class HealthAdapter {
     return out.map((day, acc) {
       final stageTotal = acc.deep + acc.light + acc.rem;
       final total = stageTotal > 0 ? stageTotal : acc.totalFallback;
+      // Onset latency = first asleep stage − in-bed start, when both anchors
+      // exist and sleep began after lights-out. Null otherwise (don't fabricate).
+      double? latency;
+      final inBed = acc.inBedStart;
+      final firstSleep = acc.firstSleepStart;
+      if (inBed != null && firstSleep != null && firstSleep.isAfter(inBed)) {
+        latency = firstSleep.difference(inBed).inMinutes.toDouble();
+      }
       return MapEntry(
         day,
         SleepNightSummary(
@@ -628,6 +669,7 @@ class HealthAdapter {
           lightMinutes: acc.light > 0 ? acc.light : null,
           remMinutes: acc.rem > 0 ? acc.rem : null,
           awakeMinutes: acc.awake,
+          sleepLatencyMinutes: latency,
         ),
       );
     });
@@ -838,12 +880,18 @@ class SleepNightSummary {
   final double? remMinutes;
   final double awakeMinutes;
 
+  /// Sleep onset latency in minutes — time from the in-bed window start to the
+  /// first asleep stage. Null when timing can't be derived (e.g. a single
+  /// SLEEP_ASLEEP block with no leading in-bed/awake segment).
+  final double? sleepLatencyMinutes;
+
   const SleepNightSummary({
     required this.totalAsleepMinutes,
     this.deepMinutes,
     this.lightMinutes,
     this.remMinutes,
     required this.awakeMinutes,
+    this.sleepLatencyMinutes,
   });
 }
 
@@ -854,4 +902,11 @@ class _SleepAcc {
   double rem = 0;
   double awake = 0;
   double totalFallback = 0;
+
+  /// Earliest start of any sleep segment (in-bed / awake / stage) — the
+  /// "lights out" anchor.
+  DateTime? inBedStart;
+
+  /// Earliest start of a non-awake (asleep) segment — sleep onset.
+  DateTime? firstSleepStart;
 }
