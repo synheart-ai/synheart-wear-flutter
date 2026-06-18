@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-06-18
+
+### Added
+- `SleepNightSummary.sleepLatencyMinutes`: sleep onset latency derived from
+  stage timing. `HealthAdapter.fetchSleepNights` tracks the in-bed start and
+  the first non-awake stage start; latency = first sleep − in-bed, or `null`
+  when it can't be derived. Additive and backward-compatible.
+- Android: a foreground service keeps generic BLE HRM streaming alive when the
+  app is backgrounded, so heart-rate sessions no longer drop on screen-off.
+
+### Fixed
+- BLE: auto-reconnect the HR monitor on a mid-session link drop instead of
+  ending the session.
+
 ## [0.4.3] - 2026-05-26
 
 ### Fixed
