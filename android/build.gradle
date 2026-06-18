@@ -90,39 +90,59 @@ android {
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
+    // Coroutines for async operations.
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
     // ========================================================================
-    // GARMIN SDK DEPENDENCY (pinned to v4.7.0)
+    // GARMIN SDK DEPENDENCY (Optional, licensed — pinned to v4.7.0)
     // ========================================================================
     //
-    // The default below is the Companion variant resolved from android/repo/.
-    // Switch to the standard variant if your users will run alongside the
-    // Garmin Connect Mobile app:
-    //   implementation 'com.garmin.health:standard-sdk:4.7.0'
-    // ========================================================================
-    implementation 'com.garmin.health:companion-sdk:4.7.0'
+    // The companion-sdk AAR and the Kotlin wrappers that call it are licensed
+    // and provisioned ONLY by `make garmin` (from the private
+    // synheart-wear-garmin-companion repo) into android/repo/. Both the AAR and
+    // the wrappers are gitignored, so the published pub.dev package ships the
+    // OSS GarminSDKBridge stub instead — and the stub needs none of these deps.
+    //
+    // Therefore wire the Garmin SDK and its required transitive deps in ONLY
+    // when the AAR is actually present. Every consumer without Garmin access
+    // (a fresh clone, CI, anyone depending on the published package) then still
+    // builds; Garmin native calls return "UNAVAILABLE" via the stub. With the
+    // AAR present (local dev after `make garmin`, or a provisioned CI), the full
+    // RTS stack is included. The check uses projectDir, so it resolves
+    // correctly whether this plugin is the root project or a transitive module.
+    //
+    // Switch companion-sdk -> standard-sdk if your users run the Garmin Connect
+    // Mobile app alongside.
+    def garminAar = file("${projectDir}/repo/com/garmin/health/companion-sdk/4.7.0/companion-sdk-4.7.0.aar")
+    if (garminAar.exists()) {
+        implementation 'com.garmin.health:companion-sdk:4.7.0'
 
-    // Required by the Garmin SDK (ListenableFuture and friends).
-    implementation 'com.google.guava:guava:32.1.3-android'
+        // Required by the Garmin SDK (ListenableFuture and friends).
+        implementation 'com.google.guava:guava:32.1.3-android'
 
-    // Garmin Health SDK references ch.qos.logback.classic.Level but its POM
-    // declares no transitive deps — without this, initializeSDK throws
-    // NoClassDefFoundError at runtime.
-    implementation 'org.slf4j:slf4j-api:1.7.36'
-    implementation 'com.github.tony19:logback-android:2.0.1'
+        // Garmin Health SDK references ch.qos.logback.classic.Level but its POM
+        // declares no transitive deps — without this, initializeSDK throws
+        // NoClassDefFoundError at runtime.
+        implementation 'org.slf4j:slf4j-api:1.7.36'
+        implementation 'com.github.tony19:logback-android:2.0.1'
 
-    // Garmin Health SDK uses SQLCipher for its encrypted local DB; loads
-    // libsqlcipher.so via System.loadLibrary and references
-    // net.zetetic.database.sqlcipher.* classes (new package, not legacy
-    // net.sqlcipher.*). Without this the :ghProcess crashes.
-    // 4.10.0 is the first release that ships 16 KB ELF-aligned native
-    // libs (required by Play Store from Nov 2025 for Android 15+ devices).
-    implementation 'net.zetetic:sqlcipher-android:4.10.0'
-    implementation 'androidx.sqlite:sqlite:2.4.0'
+        // Garmin Health SDK uses SQLCipher for its encrypted local DB; loads
+        // libsqlcipher.so via System.loadLibrary and references
+        // net.zetetic.database.sqlcipher.* classes (new package, not legacy
+        // net.sqlcipher.*). Without this the :ghProcess crashes.
+        // 4.10.0 is the first release that ships 16 KB ELF-aligned native
+        // libs (required by Play Store from Nov 2025 for Android 15+ devices).
+        implementation 'net.zetetic:sqlcipher-android:4.10.0'
+        implementation 'androidx.sqlite:sqlite:2.4.0'
 
-    // Garmin Health SDK uses Room with Guava ListenableFuture integration.
-    implementation 'androidx.room:room-runtime:2.6.1'
-    implementation 'androidx.room:room-guava:2.6.1'
-
-    // Coroutines for async operations
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+        // Garmin Health SDK uses Room with Guava ListenableFuture integration.
+        implementation 'androidx.room:room-runtime:2.6.1'
+        implementation 'androidx.room:room-guava:2.6.1'
+    } else {
+        logger.lifecycle(
+            "synheart_wear: Garmin companion-sdk AAR not found at " +
+            "${garminAar.path} — building without Garmin RTS " +
+            "(Garmin calls return UNAVAILABLE). Run `make garmin` to enable it."
+        )
+    }
 }

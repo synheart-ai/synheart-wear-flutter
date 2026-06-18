@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-06-18
+
+### Fixed
+- Android: the licensed Garmin `companion-sdk:4.7.0` dependency (and its
+  transitive stack — guava, slf4j, logback, SQLCipher, Room) is now wired in
+  only when the AAR is actually present at
+  `android/repo/.../companion-sdk-4.7.0.aar`. The AAR is gitignored and absent
+  from the published package, so previously **any** consumer of the published
+  package failed to build with `Could not find com.garmin.health:companion-sdk`.
+  Garmin is genuinely optional: without the AAR the OSS bridge stub ships and
+  Garmin calls return `UNAVAILABLE`; with it (local dev after `make garmin`, or
+  a provisioned CI) the full RTS stack is included. Dart API is unchanged.
+
 ## [0.4.4] - 2026-06-18
 
 ### Added
