@@ -15,6 +15,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Native Android handler for BLE Heart Rate Monitor operations.
@@ -149,6 +150,16 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         val devices = mutableListOf<Map<String, Any>>()
         val seenIds = mutableSetOf<String>()
 
+        // Flutter's MethodChannel.Result can only be replied to ONCE.
+        // The timeout below completes the scan with success, while
+        // onScanFailed completes it with an error. Async scan-registration
+        // failures (e.g. SCAN_FAILED_APPLICATION_REGISTRATION_FAILED) arrive
+        // after startScan() returns, so without a guard both paths can fire and
+        // crash the process with IllegalStateException: Reply already submitted.
+        val resultSubmitted = AtomicBoolean(false)
+        // Set once the timeout is scheduled so onScanFailed can cancel it.
+        var timeoutRunnable: Runnable? = null
+
         val scanCallback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, sr: ScanResult) {
                 val id = sr.device.address
@@ -168,6 +179,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             }
 
             override fun onScanFailed(errorCode: Int) {
+                if (!resultSubmitted.compareAndSet(false, true)) return
+                timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
                 result.error("PERMISSION_DENIED", "BLE scan failed with error code: $errorCode", null)
             }
         }
@@ -188,12 +201,15 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             return
         }
 
-        mainHandler.postDelayed({
+        val completeRunnable = Runnable {
+            if (!resultSubmitted.compareAndSet(false, true)) return@Runnable
             try {
                 scanner.stopScan(scanCallback)
             } catch (_: SecurityException) {}
             result.success(devices)
-        }, timeoutMs.toLong())
+        }
+        timeoutRunnable = completeRunnable
+        mainHandler.postDelayed(completeRunnable, timeoutMs.toLong())
     }
 
     // MARK: - Connect
@@ -402,6 +418,15 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
     // MARK: - Parse HR Measurement
 
     private fun parseHeartRateMeasurement(data: ByteArray, device: BluetoothDevice): Map<String, Any> {
+        // A malformed or truncated notification (e.g. BLE corruption or a
+        // misbehaving strap) can be shorter than the spec requires. Indexing
+        // past the end throws ArrayIndexOutOfBoundsException and crashes the
+        // process, so bail out and report no usable sample when the buffer is
+        // too short to hold the flags byte plus at least one BPM byte.
+        if (data.size < 2) {
+            return makeSample(0.0, emptyList(), device)
+        }
+
         val flags = data[0].toInt() and 0xFF
         val is16Bit = (flags and 0x01) != 0
         val hasRR = (flags and 0x10) != 0
@@ -409,6 +434,10 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         var offset = 1
         val bpm: Double
         if (is16Bit) {
+            // Need two bytes for a 16-bit BPM; skip the read if truncated.
+            if (offset + 1 >= data.size) {
+                return makeSample(0.0, emptyList(), device)
+            }
             bpm = ((data[offset].toInt() and 0xFF) or ((data[offset + 1].toInt() and 0xFF) shl 8)).toDouble()
             offset += 2
         } else {
@@ -430,6 +459,10 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             }
         }
 
+        return makeSample(bpm, rrIntervals, device)
+    }
+
+    private fun makeSample(bpm: Double, rrIntervals: List<Double>, device: BluetoothDevice): Map<String, Any> {
         val deviceName: String = try {
             device.name ?: ""
         } catch (_: SecurityException) { "" }
