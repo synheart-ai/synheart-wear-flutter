@@ -487,6 +487,15 @@ extension BleHrmHandler: CBPeripheralDelegate {
 
     /// Parse the BLE Heart Rate Measurement characteristic value per Bluetooth SIG spec.
     private func parseHeartRateMeasurement(_ data: Data, peripheral: CBPeripheral) -> [String: Any] {
+        // A malformed or truncated notification (e.g. BLE corruption or a
+        // misbehaving strap) can be shorter than the spec requires. Reading
+        // past the end of `Data` traps and crashes the host process, so bail
+        // out and report no usable sample when the buffer is too short to hold
+        // the flags byte plus at least one BPM byte.
+        guard data.count >= 2 else {
+            return makeSample(bpm: 0, rrIntervals: [], peripheral: peripheral)
+        }
+
         let flags = data[0]
         let is16Bit = (flags & 0x01) != 0
         let hasRR = (flags & 0x10) != 0
@@ -494,6 +503,10 @@ extension BleHrmHandler: CBPeripheralDelegate {
         var offset = 1
         let bpm: Double
         if is16Bit {
+            // Need two bytes for a 16-bit BPM; skip the read if truncated.
+            guard offset + 1 < data.count else {
+                return makeSample(bpm: 0, rrIntervals: [], peripheral: peripheral)
+            }
             bpm = Double(UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8))
             offset += 2
         } else {
@@ -515,6 +528,10 @@ extension BleHrmHandler: CBPeripheralDelegate {
             }
         }
 
+        return makeSample(bpm: bpm, rrIntervals: rrIntervals, peripheral: peripheral)
+    }
+
+    private func makeSample(bpm: Double, rrIntervals: [Double], peripheral: CBPeripheral) -> [String: Any] {
         return [
             "tsMs": Int(Date().timeIntervalSince1970 * 1000),
             "bpm": bpm,
