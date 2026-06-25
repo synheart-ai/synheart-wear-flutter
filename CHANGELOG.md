@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-06-25
+
+### Fixed
+- **BLE heart-rate handler: two native crash fixes.**
+  - Bounds-check the HR Measurement parser (iOS + Android) before reading the
+    flags byte, the 16-bit BPM, and each RR interval — a malformed/truncated
+    notification no longer traps (Swift) / throws `ArrayIndexOutOfBoundsException`
+    (Android).
+  - Android scan now answers the result channel at most once: a single-fire
+    guard shared between `onScanFailed` and the scan timeout prevents the
+    `IllegalStateException: Reply already submitted` crash.
+
 ## [0.4.5] - 2026-06-18
 
 ### Fixed
