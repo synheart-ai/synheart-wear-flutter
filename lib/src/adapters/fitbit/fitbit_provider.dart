@@ -20,6 +20,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/logger.dart';
 import '../../core/models.dart' show WearMetrics;
+import '../wear_request_signer.dart';
 
 class FitbitProvider {
   // ── Storage keys ─────────────────────────────────────────────────
@@ -50,6 +51,10 @@ class FitbitProvider {
   String? userId;
   final bool _baseUrlExplicitlyProvided;
 
+  /// Optional hook to supply per-request auth headers. When null, requests use
+  /// the default app-id/api-key headers.
+  final WearRequestSigner? signRequest;
+
   String get _apiBase => baseUrl.endsWith('/')
       ? baseUrl.substring(0, baseUrl.length - 1)
       : baseUrl;
@@ -61,6 +66,7 @@ class FitbitProvider {
     String? projectId,
     String? redirectUri,
     this.userId,
+    this.signRequest,
     bool loadFromStorage = true,
   }) : baseUrl = baseUrl ?? defaultBaseUrl,
        appId = appId ?? '',
@@ -164,14 +170,15 @@ class FitbitProvider {
       throw StateError('FitbitProvider: userId required to initiate OAuth');
     }
     final url = Uri.parse('$_apiBase/oauth/$vendorName/initiate');
+    final body = jsonEncode({
+      'user_id': uid,
+      'redirect_uri': redirectUri,
+      'project_id': projectId,
+    });
     final resp = await http.post(
       url,
-      headers: _baseHeaders(),
-      body: jsonEncode({
-        'user_id': uid,
-        'redirect_uri': redirectUri,
-        'project_id': projectId,
-      }),
+      headers: await _requestHeaders('POST', url, bodyBytes: utf8.encode(body)),
+      body: body,
     );
     if (resp.statusCode >= 400) {
       throw Exception(
@@ -241,11 +248,13 @@ class FitbitProvider {
       return;
     }
     final url = Uri.parse('$_apiBase/$vendorName/disconnect');
+    final body = jsonEncode({'user_id': uid});
     try {
       await http.post(
         url,
-        headers: _baseHeaders(),
-        body: jsonEncode({'user_id': uid}),
+        headers:
+            await _requestHeaders('POST', url, bodyBytes: utf8.encode(body)),
+        body: body,
       );
     } catch (e) {
       logWarning('FitbitProvider.disconnect: ${e.toString()}');
@@ -283,7 +292,7 @@ class FitbitProvider {
     final url = Uri.parse(
       '$_apiBase/$vendorName/single',
     ).replace(queryParameters: qp);
-    final resp = await http.get(url, headers: _baseHeaders());
+    final resp = await http.get(url, headers: await _requestHeaders('GET', url));
     if (resp.statusCode >= 400) {
       logWarning(
         'FitbitProvider.fetchUserProfile: ${resp.statusCode} ${resp.body}',
@@ -319,7 +328,7 @@ class FitbitProvider {
     final url = Uri.parse(
       '$_apiBase/$vendorName/data',
     ).replace(queryParameters: qp);
-    final resp = await http.get(url, headers: _baseHeaders());
+    final resp = await http.get(url, headers: await _requestHeaders('GET', url));
     if (resp.statusCode >= 400) {
       throw Exception(
         'FitbitProvider._fetchData($dataType): '
@@ -341,6 +350,25 @@ class FitbitProvider {
     };
     if (apiKey.isNotEmpty) headers['x-api-key'] = apiKey;
     if (appId.isNotEmpty) headers['x-app-id'] = appId;
+    return headers;
+  }
+
+  /// Headers for a request, using [signRequest] when provided and falling back
+  /// to [_baseHeaders] otherwise. [bodyBytes] must be the exact bytes sent as
+  /// the request body (null for requests without a body).
+  Future<Map<String, String>> _requestHeaders(
+    String method,
+    Uri url, {
+    List<int>? bodyBytes,
+  }) async {
+    if (signRequest == null) return _baseHeaders();
+    final headers = <String, String>{
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    };
+    headers.addAll(
+      await signRequest!(method: method, url: url, bodyBytes: bodyBytes),
+    );
     return headers;
   }
 
