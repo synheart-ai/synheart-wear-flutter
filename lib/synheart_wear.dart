@@ -177,6 +177,7 @@ export 'src/adapters/ble_hrm_bridge.dart';
 // Cloud vendor providers — vendor link flows (OAuth, credential storage,
 // deep-link callbacks) live here alongside the direct-device adapters.
 // Once linked, the Stream service consumes these handles for transport.
+export 'src/adapters/wear_request_signer.dart';
 export 'src/adapters/whoop/whoop_provider.dart';
 export 'src/adapters/garmin_health/garmin_provider.dart';
 export 'src/adapters/oura/oura_provider.dart';

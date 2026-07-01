@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/logger.dart';
 import '../../core/models.dart' show WearMetrics;
+import '../wear_request_signer.dart';
 
 /// Provider for Whoop cloud API integration
 ///
@@ -35,6 +36,10 @@ class WhoopProvider {
   String? userId;
   final bool _baseUrlExplicitlyProvided;
 
+  /// Optional hook to supply per-request auth headers. When null, requests use
+  /// the default app-id/app-key headers.
+  final WearRequestSigner? signRequest;
+
   /// Base URL for all API requests (auth, data, events).
   String get _apiBase {
     final b = baseUrl.endsWith('/')
@@ -50,6 +55,7 @@ class WhoopProvider {
     String? projectId,
     String? redirectUri,
     this.userId,
+    this.signRequest,
     bool loadFromStorage = true,
   }) : baseUrl = baseUrl ?? defaultBaseUrl,
        appId = appId ?? 'app_test_ios_XvHE1g',
@@ -155,6 +161,25 @@ class WhoopProvider {
     return h;
   }
 
+  /// Headers for a request, using [signRequest] when provided and falling back
+  /// to [_authHeaders] otherwise. [bodyBytes] must be the exact bytes sent as
+  /// the request body (null for requests without a body).
+  Future<Map<String, String>> _requestHeaders(
+    String method,
+    Uri url, {
+    List<int>? bodyBytes,
+  }) async {
+    if (signRequest == null) return _authHeaders();
+    final h = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+    h.addAll(
+      await signRequest!(method: method, url: url, bodyBytes: bodyBytes),
+    );
+    return h;
+  }
+
   /// Save configuration to local storage
   Future<void> saveConfiguration({
     String? baseUrl,
@@ -250,10 +275,15 @@ class WhoopProvider {
     };
 
     try {
+      final body = jsonEncode(requestBody);
       final response = await http.post(
         serviceUrl,
-        headers: _authHeaders(),
-        body: jsonEncode(requestBody),
+        headers: await _requestHeaders(
+          'POST',
+          serviceUrl,
+          bodyBytes: utf8.encode(body),
+        ),
+        body: body,
       );
 
       if (response.statusCode != 200) {
@@ -694,7 +724,7 @@ class WhoopProvider {
       'WHOOP data fetch: type=$type user=${_redactId(userId)} '
       'limit=$limit hasCursor=${cursor != null && cursor.isNotEmpty}',
     );
-    final res = await http.get(uri, headers: _authHeaders());
+    final res = await http.get(uri, headers: await _requestHeaders('GET', uri));
     // Full response bodies are third-party PII (sleep stages, HR samples)
     // and routinely tens of KB; never log at INFO. Surface status + size
     // only — re-run with a local print if you need the payload.
@@ -1092,7 +1122,8 @@ class WhoopProvider {
     final uri = Uri.parse(
       '$_apiBase/whoop/oauth/disconnect',
     ).replace(queryParameters: {'user_id': userId, 'app_id': appId});
-    final res = await http.delete(uri, headers: _authHeaders());
+    final res =
+        await http.delete(uri, headers: await _requestHeaders('DELETE', uri));
     if (res.statusCode != 200) throw Exception(res.body);
   }
 }

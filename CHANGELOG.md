@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-01
+
+### Added
+- **Optional per-request auth-header signer for the cloud providers.** `GarminProvider`,
+  `WhoopProvider`, `OuraProvider`, and `FitbitProvider` now accept an optional
+  `signRequest` callback (`WearRequestSigner`). When supplied, every backend
+  request (OAuth initiate, data fetch, backfill, disconnect) uses the returned
+  headers in place of the default app credentials; when omitted, behaviour is
+  unchanged. This lets a host app attach device-attested headers to satisfy a
+  backend that requires per-request authentication.
+
 ## [0.4.6] - 2026-06-25
 
 ### Fixed
