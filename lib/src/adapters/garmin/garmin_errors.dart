@@ -193,10 +193,17 @@ GarminSDKError garminErrorFromPlatformException(
       );
     }
 
+    // The platform layer reports both an explicit failure (PAIRING_FAILED) and
+    // a wrapped SDK exception (PAIRING_ERROR); map both to a pairing error with
+    // actionable guidance rather than a raw SDK string. The technical detail is
+    // preserved on originalException for logging.
     if (errorString.contains('PAIRING_FAILED') ||
+        errorString.contains('PAIRING_ERROR') ||
         errorString.contains('PAIRING_CANCELLED')) {
       return GarminPairingError(
-        defaultMessage ?? 'Device pairing failed',
+        'Could not pair the device. Make sure it is nearby, unlocked, with '
+        'Bluetooth enabled, and not already connected elsewhere. Some older '
+        'or basic models do not support direct pairing.',
         originalException: error,
       );
     }
