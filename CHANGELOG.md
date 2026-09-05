@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **BLE HRM: request a low-latency connection before subscribing to heart-rate
+  notifications (Android).** Straps that report RR intervals notify once per
+  beat; on the default connection interval the link falls behind above ~70 bpm
+  and the strap drops the beats it cannot send, leaving an RR series that is
+  short by 10–40% while the HR value looks normal. Requesting
+  `CONNECTION_PRIORITY_HIGH` at subscribe time keeps the link ahead of any human
+  heart rate. Applied on both the initial connect and the reconnect path.
+
 ## [0.5.0] - 2026-07-01
 
 ### Added

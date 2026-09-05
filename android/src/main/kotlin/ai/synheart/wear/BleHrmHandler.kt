@@ -276,6 +276,7 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                 val characteristic = service.getCharacteristic(HR_MEASUREMENT_UUID) ?: return
 
                 try {
+                    requestLowLatency(gatt)
                     gatt.setCharacteristicNotification(characteristic, true)
                     val descriptor = characteristic.getDescriptor(CCCD_UUID)
                     if (descriptor != null) {
@@ -362,6 +363,7 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                         val service = gatt.getService(HR_SERVICE_UUID) ?: return
                         val characteristic = service.getCharacteristic(HR_MEASUREMENT_UUID) ?: return
                         try {
+                            requestLowLatency(gatt)
                             gatt.setCharacteristicNotification(characteristic, true)
                             val descriptor = characteristic.getDescriptor(CCCD_UUID)
                             if (descriptor != null) {
@@ -416,6 +418,25 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
     }
 
     // MARK: - Parse HR Measurement
+
+    /**
+     * Ask for a low-latency connection interval before enabling HR notifications.
+     *
+     * Chest straps that report RR intervals send one notification per heartbeat.
+     * On the platform's default (balanced) interval the link cannot always carry
+     * a notification per beat once heart rate climbs past roughly 70 bpm, and the
+     * strap drops the beats it could not send rather than queueing them. The HR
+     * value stays plausible, so the loss is invisible downstream; only the RR
+     * series is short. A high-priority interval keeps up with any human heart
+     * rate. Best-effort: the call is advisory and the stack may decline.
+     */
+    private fun requestLowLatency(gatt: BluetoothGatt) {
+        try {
+            gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+        } catch (_: SecurityException) {
+            // Missing BLUETOOTH_CONNECT at this point would already have failed connectGatt.
+        }
+    }
 
     private fun parseHeartRateMeasurement(data: ByteArray, device: BluetoothDevice): Map<String, Any> {
         // A malformed or truncated notification (e.g. BLE corruption or a
