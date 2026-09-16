@@ -113,29 +113,22 @@ class GarminRealTimeData {
   }
 }
 
-/// Accelerometer data from Garmin device
-class GarminAccelerometerData {
-  /// X-axis acceleration (mg)
+/// One accelerometer sample (mg) with the device's sample timestamp.
+class GarminAccelerometerSample {
   final double x;
-
-  /// Y-axis acceleration (mg)
   final double y;
-
-  /// Z-axis acceleration (mg)
   final double z;
-
-  /// Sample timestamp
   final DateTime timestamp;
 
-  GarminAccelerometerData({
+  const GarminAccelerometerSample({
     required this.x,
     required this.y,
     required this.z,
     required this.timestamp,
   });
 
-  factory GarminAccelerometerData.fromMap(Map<String, dynamic> map) {
-    return GarminAccelerometerData(
+  factory GarminAccelerometerSample.fromMap(Map<String, dynamic> map) {
+    return GarminAccelerometerSample(
       x: (map['x'] as num).toDouble(),
       y: (map['y'] as num).toDouble(),
       z: (map['z'] as num).toDouble(),
@@ -150,6 +143,79 @@ class GarminAccelerometerData {
     'y': y,
     'z': z,
     'timestamp': timestamp.millisecondsSinceEpoch,
+  };
+}
+
+/// Accelerometer data from Garmin device.
+///
+/// The device delivers acceleration in batches of samples. [samples] holds
+/// the whole batch in order, each with its own device timestamp; [x], [y],
+/// [z] and [timestamp] mirror the last sample so older readers still work.
+class GarminAccelerometerData {
+  /// X-axis acceleration (mg) of the last sample in the batch
+  final double x;
+
+  /// Y-axis acceleration (mg) of the last sample in the batch
+  final double y;
+
+  /// Z-axis acceleration (mg) of the last sample in the batch
+  final double z;
+
+  /// Timestamp of the last sample in the batch
+  final DateTime timestamp;
+
+  /// Every sample of the batch, oldest first. Contains at least the last
+  /// sample when the platform delivered only one.
+  final List<GarminAccelerometerSample> samples;
+
+  /// Sampling rate the device reported for this batch (Hz), when known.
+  final int? samplingRateHz;
+
+  GarminAccelerometerData({
+    required this.x,
+    required this.y,
+    required this.z,
+    required this.timestamp,
+    List<GarminAccelerometerSample>? samples,
+    this.samplingRateHz,
+  }) : samples =
+           samples ??
+           [GarminAccelerometerSample(x: x, y: y, z: z, timestamp: timestamp)];
+
+  factory GarminAccelerometerData.fromMap(Map<String, dynamic> map) {
+    final rawSamples = map['samples'];
+    final samples = rawSamples is List
+        ? rawSamples
+              .whereType<Map>()
+              .map(
+                (m) => GarminAccelerometerSample.fromMap(
+                  Map<String, dynamic>.from(m),
+                ),
+              )
+              .toList()
+        : null;
+    final last = (samples != null && samples.isNotEmpty) ? samples.last : null;
+    return GarminAccelerometerData(
+      x: last?.x ?? (map['x'] as num).toDouble(),
+      y: last?.y ?? (map['y'] as num).toDouble(),
+      z: last?.z ?? (map['z'] as num).toDouble(),
+      timestamp:
+          last?.timestamp ??
+          (map['timestamp'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int)
+              : DateTime.now()),
+      samples: (samples != null && samples.isNotEmpty) ? samples : null,
+      samplingRateHz: (map['samplingRateHz'] as num?)?.toInt(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'x': x,
+    'y': y,
+    'z': z,
+    'timestamp': timestamp.millisecondsSinceEpoch,
+    'samples': samples.map((s) => s.toMap()).toList(),
+    if (samplingRateHz != null) 'samplingRateHz': samplingRateHz,
   };
 
   /// Get the magnitude of acceleration (Euclidean distance)

@@ -7,6 +7,7 @@ import '../../models/garmin_device.dart';
 import '../../models/wearable_device.dart';
 import '../wear_adapter.dart';
 import 'garmin_sdk_adapter.dart';
+import '../../models/garmin_realtime_data.dart';
 
 /// Public facade for Garmin Health SDK integration
 ///
@@ -161,6 +162,11 @@ class GarminHealth {
   /// Returns [WearMetrics] instances, not Garmin-specific real-time data.
   Stream<WearMetrics> get realTimeStream =>
       _adapter.realTimeStream.map(_adapter.convertRealTimeToMetrics);
+
+  /// Stream of real-time data as delivered by the device, before conversion
+  /// to [WearMetrics]. Carries what the unified form drops: accelerometer
+  /// batches with per-sample timestamps, beat-to-beat intervals as sent.
+  Stream<GarminRealTimeData> get rawRealTimeStream => _adapter.realTimeStream;
 
   // ============================================
   // Metrics

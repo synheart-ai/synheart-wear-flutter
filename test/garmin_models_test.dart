@@ -310,6 +310,48 @@ void main() {
     });
   });
 
+  group('GarminAccelerometerData batches', () {
+    test('parses a whole batch with per-sample timestamps and the rate', () {
+      final data = GarminAccelerometerData.fromMap({
+        'x': 3.0,
+        'y': -2.0,
+        'z': 1001.0,
+        'timestamp': 1_700_000_000_080,
+        'samplingRateHz': 25,
+        'samples': [
+          {'x': 1, 'y': 0, 'z': 999, 'timestamp': 1_700_000_000_000},
+          {'x': 2, 'y': -1, 'z': 1000, 'timestamp': 1_700_000_000_040},
+          {'x': 3, 'y': -2, 'z': 1001, 'timestamp': 1_700_000_000_080},
+        ],
+      });
+      expect(data.samples.length, 3);
+      expect(data.samplingRateHz, 25);
+      expect(
+        data.samples.first.timestamp.millisecondsSinceEpoch,
+        1_700_000_000_000,
+      );
+      // Top-level fields mirror the last sample.
+      expect(data.x, 3.0);
+      expect(data.z, 1001.0);
+      expect(data.timestamp.millisecondsSinceEpoch, 1_700_000_000_080);
+      final round = GarminAccelerometerData.fromMap(data.toMap());
+      expect(round.samples.length, 3);
+      expect(round.samplingRateHz, 25);
+    });
+
+    test('a single-sample map still yields one sample', () {
+      final data = GarminAccelerometerData.fromMap({
+        'x': 10.0,
+        'y': 20.0,
+        'z': 980.0,
+        'timestamp': 1_700_000_000_000,
+      });
+      expect(data.samples.length, 1);
+      expect(data.samples.single.z, 980.0);
+      expect(data.samplingRateHz, isNull);
+    });
+  });
+
   group('GarminRealTimeData', () {
     test('fromMap creates data correctly', () {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
