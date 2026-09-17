@@ -14,6 +14,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import android.util.Log
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -26,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
     companion object {
+        private const val TAG = "BleHrm"
         private val HR_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
         private val HR_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
         private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
@@ -305,6 +307,19 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             }
 
             // API 33+ callback (non-deprecated)
+            override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                if (characteristic.uuid == PMD_CONTROL_UUID) Log.i(TAG, "motion: control write status=$status")
+            }
+
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+
+                Log.i(TAG, "motion: MTU now $mtu (status=$status)")
+
+                motionOnMtuChanged(gatt)
+
+            }
+
+
             override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
                 if (status == BluetoothGatt.GATT_SUCCESS) motionOnDescriptorWrite(gatt, descriptor)
             }
@@ -349,28 +364,57 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
     // notifications on the data characteristic, then write the start command.
     private fun motionOnDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor) {
         if (!motionEnabled) return
-        val svc = gatt.getService(PMD_SERVICE_UUID) ?: return
+        val svc = gatt.getService(PMD_SERVICE_UUID)
+        if (svc == null) {
+            Log.i(TAG, "motion: device has no measurement-data service")
+            return
+        }
         when (descriptor.characteristic.uuid) {
             HR_MEASUREMENT_UUID -> {
-                val control = svc.getCharacteristic(PMD_CONTROL_UUID) ?: return
-                enableCccd(gatt, control, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+                // The strap refuses to start a stream over the default 23-byte
+                // MTU (control-point status 0x0a); its accelerometer frames need
+                // a larger one. Ask for 512 and continue in onMtuChanged.
+                Log.i(TAG, "motion: HR subscribed; requesting MTU 512")
+                val ok = try { gatt.requestMtu(512) } catch (_: SecurityException) { false }
+                if (!ok) motionOnMtuChanged(gatt)
             }
             PMD_CONTROL_UUID -> {
+                Log.i(TAG, "motion: control point subscribed; enabling data notifications")
                 val data = svc.getCharacteristic(PMD_DATA_UUID) ?: return
                 enableCccd(gatt, data, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             }
             PMD_DATA_UUID -> {
                 val control = svc.getCharacteristic(PMD_CONTROL_UUID) ?: return
-                writeCharacteristic(gatt, control, startAccelCommand(motionRateHz))
+                val cmd = startAccelCommand(motionRateHz)
+                val rc = writeCharacteristic(gatt, control, cmd)
+                Log.i(TAG, "motion: data subscribed; start command written rc=$rc bytes=${cmd.joinToString(" ") { "%02x".format(it) }}")
             }
         }
     }
+
+    private fun motionOnMtuChanged(gatt: BluetoothGatt) {
+        if (!motionEnabled) return
+        val svc = gatt.getService(PMD_SERVICE_UUID) ?: return
+        Log.i(TAG, "motion: enabling control-point indications")
+        val control = svc.getCharacteristic(PMD_CONTROL_UUID) ?: return
+        enableCccd(gatt, control, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+    }
+
+    private var motionFrames = 0
 
     private fun motionOnCharacteristicChanged(uuid: UUID, value: ByteArray) {
         val type = when (uuid) {
             PMD_DATA_UUID -> "pmd_data"
             PMD_CONTROL_UUID -> "pmd_control"
             else -> return
+        }
+        if (type == "pmd_control") {
+            Log.i(TAG, "motion: control response ${value.joinToString(" ") { "%02x".format(it) }}")
+        } else {
+            motionFrames++
+            if (motionFrames == 1 || motionFrames % 100 == 0) {
+                Log.i(TAG, "motion: frame #$motionFrames len=${value.size} type=${"%02x".format(value.getOrNull(0) ?: 0)} frameType=${"%02x".format(value.getOrNull(9) ?: 0)}")
+            }
         }
         val event = mapOf(
             "type" to type,
@@ -395,8 +439,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         } catch (_: SecurityException) {}
     }
 
-    private fun writeCharacteristic(gatt: BluetoothGatt, ch: BluetoothGattCharacteristic, bytes: ByteArray) {
-        try {
+    private fun writeCharacteristic(gatt: BluetoothGatt, ch: BluetoothGattCharacteristic, bytes: ByteArray): Int {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 gatt.writeCharacteristic(ch, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
             } else {
@@ -404,9 +448,12 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                 ch.value = bytes
                 ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                 @Suppress("DEPRECATION")
-                gatt.writeCharacteristic(ch)
+                if (gatt.writeCharacteristic(ch)) 0 else -1
             }
-        } catch (_: SecurityException) {}
+        } catch (e: SecurityException) {
+            Log.w(TAG, "motion: write refused: ${e.message}")
+            -2
+        }
     }
 
     // Start accelerometer: op 0x02, type 0x02; settings sample rate (Hz,
@@ -474,6 +521,26 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                             }
                         } catch (_: SecurityException) {}
                     }
+
+                    override fun onCharacteristicWrite(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+
+                        if (characteristic.uuid == PMD_CONTROL_UUID) Log.i(TAG, "motion: control write status=$status")
+
+                    }
+
+
+                    override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+
+
+                        Log.i(TAG, "motion: MTU now $mtu (status=$status)")
+
+
+                        motionOnMtuChanged(gatt)
+
+
+                    }
+
+
 
                     override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
 
