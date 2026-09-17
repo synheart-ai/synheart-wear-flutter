@@ -29,6 +29,10 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
         private val HR_SERVICE_UUID: UUID = UUID.fromString("0000180d-0000-1000-8000-00805f9b34fb")
         private val HR_MEASUREMENT_UUID: UUID = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
         private val CCCD_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // Measurement-data service of Polar chest straps (accelerometer, ECG).
+        private val PMD_SERVICE_UUID: UUID = UUID.fromString("fb005c80-02e7-f387-1cad-8acd2d8df0c8")
+        private val PMD_CONTROL_UUID: UUID = UUID.fromString("fb005c81-02e7-f387-1cad-8acd2d8df0c8")
+        private val PMD_DATA_UUID: UUID = UUID.fromString("fb005c82-02e7-f387-1cad-8acd2d8df0c8")
 
         fun registerWith(binding: FlutterPlugin.FlutterPluginBinding) {
             val handler = BleHrmHandler(binding.applicationContext)
@@ -48,6 +52,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
     private var lastDeviceId: String? = null
     private var reconnectRunnable: Runnable? = null
     private var reconnectAttempts = 0
+    private var motionEnabled = false
+    private var motionRateHz = 50
     private val maxReconnectAttempts = 5
     private val reconnectDelayMs = 3000L
 
@@ -70,6 +76,8 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                     return
                 }
                 sessionId = call.argument<String>("sessionId")
+                motionEnabled = call.argument<Boolean>("enableMotion") ?: false
+                motionRateHz = call.argument<Int>("motionSampleRateHz") ?: 50
                 connect(deviceId, result)
             }
             "disconnect" -> disconnect(result)
@@ -297,8 +305,15 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             }
 
             // API 33+ callback (non-deprecated)
+            override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                if (status == BluetoothGatt.GATT_SUCCESS) motionOnDescriptorWrite(gatt, descriptor)
+            }
+
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-                if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+                if (characteristic.uuid != HR_MEASUREMENT_UUID) {
+                    motionOnCharacteristicChanged(characteristic.uuid, value)
+                    return
+                }
                 val sample = parseHeartRateMeasurement(value, gatt.device)
                 mainHandler.post { eventSink?.success(sample) }
             }
@@ -306,9 +321,12 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             // Pre-API 33 fallback (deprecated but needed for older devices)
             @Deprecated("Deprecated in API 33", ReplaceWith("onCharacteristicChanged(gatt, characteristic, value)"))
             override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-                if (characteristic.uuid != HR_MEASUREMENT_UUID) return
                 @Suppress("DEPRECATION")
                 val data = characteristic.value ?: return
+                if (characteristic.uuid != HR_MEASUREMENT_UUID) {
+                    motionOnCharacteristicChanged(characteristic.uuid, data)
+                    return
+                }
                 val sample = parseHeartRateMeasurement(data, gatt.device)
                 mainHandler.post { eventSink?.success(sample) }
             }
@@ -321,6 +339,84 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
             result.error("PERMISSION_DENIED", "Bluetooth permission denied: ${e.message}", null)
         }
     }
+
+    // MARK: - Motion (measurement-data service)
+
+    // The strap's accelerometer lives on a vendor service beside the standard
+    // heart-rate service. GATT operations must be serialised, so the set-up
+    // runs as a chain of descriptor writes: once the heart-rate subscription
+    // is acknowledged, enable indications on the control point, then
+    // notifications on the data characteristic, then write the start command.
+    private fun motionOnDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor) {
+        if (!motionEnabled) return
+        val svc = gatt.getService(PMD_SERVICE_UUID) ?: return
+        when (descriptor.characteristic.uuid) {
+            HR_MEASUREMENT_UUID -> {
+                val control = svc.getCharacteristic(PMD_CONTROL_UUID) ?: return
+                enableCccd(gatt, control, BluetoothGattDescriptor.ENABLE_INDICATION_VALUE)
+            }
+            PMD_CONTROL_UUID -> {
+                val data = svc.getCharacteristic(PMD_DATA_UUID) ?: return
+                enableCccd(gatt, data, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+            }
+            PMD_DATA_UUID -> {
+                val control = svc.getCharacteristic(PMD_CONTROL_UUID) ?: return
+                writeCharacteristic(gatt, control, startAccelCommand(motionRateHz))
+            }
+        }
+    }
+
+    private fun motionOnCharacteristicChanged(uuid: UUID, value: ByteArray) {
+        val type = when (uuid) {
+            PMD_DATA_UUID -> "pmd_data"
+            PMD_CONTROL_UUID -> "pmd_control"
+            else -> return
+        }
+        val event = mapOf(
+            "type" to type,
+            "bytes" to value,
+            "arrivalMs" to System.currentTimeMillis()
+        )
+        mainHandler.post { eventSink?.success(event) }
+    }
+
+    private fun enableCccd(gatt: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
+        try {
+            gatt.setCharacteristicNotification(ch, true)
+            val descriptor = ch.getDescriptor(CCCD_UUID) ?: return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeDescriptor(descriptor, value)
+            } else {
+                @Suppress("DEPRECATION")
+                descriptor.value = value
+                @Suppress("DEPRECATION")
+                gatt.writeDescriptor(descriptor)
+            }
+        } catch (_: SecurityException) {}
+    }
+
+    private fun writeCharacteristic(gatt: BluetoothGatt, ch: BluetoothGattCharacteristic, bytes: ByteArray) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                gatt.writeCharacteristic(ch, bytes, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT)
+            } else {
+                @Suppress("DEPRECATION")
+                ch.value = bytes
+                ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                @Suppress("DEPRECATION")
+                gatt.writeCharacteristic(ch)
+            }
+        } catch (_: SecurityException) {}
+    }
+
+    // Start accelerometer: op 0x02, type 0x02; settings sample rate (Hz,
+    // uint16), resolution 16 bit, range 8 g.
+    private fun startAccelCommand(rateHz: Int): ByteArray = byteArrayOf(
+        0x02, 0x02,
+        0x00, 0x01, (rateHz and 0xff).toByte(), ((rateHz shr 8) and 0xff).toByte(),
+        0x01, 0x01, 0x10, 0x00,
+        0x02, 0x01, 0x08, 0x00
+    )
 
     // MARK: - Reconnect
 
@@ -379,17 +475,34 @@ class BleHrmHandler(private val context: Context) : MethodChannel.MethodCallHand
                         } catch (_: SecurityException) {}
                     }
 
+                    override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+
+                        if (status == BluetoothGatt.GATT_SUCCESS) motionOnDescriptorWrite(gatt, descriptor)
+
+                    }
+
+
                     override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-                        if (characteristic.uuid != HR_MEASUREMENT_UUID) return
+
+                        if (characteristic.uuid != HR_MEASUREMENT_UUID) {
+
+                            motionOnCharacteristicChanged(characteristic.uuid, value)
+
+                            return
+
+                        }
                         val sample = parseHeartRateMeasurement(value, gatt.device)
                         mainHandler.post { eventSink?.success(sample) }
                     }
 
                     @Deprecated("Deprecated in API 33")
                     override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
-                        if (characteristic.uuid != HR_MEASUREMENT_UUID) return
                         @Suppress("DEPRECATION")
                         val data = characteristic.value ?: return
+                        if (characteristic.uuid != HR_MEASUREMENT_UUID) {
+                            motionOnCharacteristicChanged(characteristic.uuid, data)
+                            return
+                        }
                         val sample = parseHeartRateMeasurement(data, gatt.device)
                         mainHandler.post { eventSink?.success(sample) }
                     }

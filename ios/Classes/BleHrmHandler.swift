@@ -52,6 +52,28 @@ public class BleHrmHandler: NSObject {
     private let heartRateServiceUUID = CBUUID(string: "180D")
     // Heart Rate Measurement Characteristic UUID
     private let heartRateMeasurementUUID = CBUUID(string: "2A37")
+    // Measurement-data service of Polar chest straps (accelerometer, ECG).
+    private let pmdServiceUUID = CBUUID(string: "FB005C80-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private let pmdControlUUID = CBUUID(string: "FB005C81-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private let pmdDataUUID = CBUUID(string: "FB005C82-02E7-F387-1CAD-8ACD2D8DF0C8")
+    private var motionEnabled = false
+    private var motionRateHz = 50
+    private var motionStartSent = false
+
+    private func servicesToDiscover() -> [CBUUID] {
+        return motionEnabled ? [heartRateServiceUUID, pmdServiceUUID] : [heartRateServiceUUID]
+    }
+
+    // Start accelerometer: op 0x02, type 0x02; settings sample rate (Hz,
+    // uint16), resolution 16 bit, range 8 g.
+    private func startAccelCommand(rateHz: Int) -> Data {
+        return Data([
+            0x02, 0x02,
+            0x00, 0x01, UInt8(rateHz & 0xff), UInt8((rateHz >> 8) & 0xff),
+            0x01, 0x01, 0x10, 0x00,
+            0x02, 0x01, 0x08, 0x00,
+        ])
+    }
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let handler = BleHrmHandler()
@@ -83,6 +105,9 @@ public class BleHrmHandler: NSObject {
                 return
             }
             let sid = args["sessionId"] as? String
+            motionEnabled = args["enableMotion"] as? Bool ?? false
+            motionRateHz = args["motionSampleRateHz"] as? Int ?? 50
+            motionStartSent = false
             connect(deviceId: deviceId, sessionId: sid, result: result)
         case "disconnect":
             disconnect(result: result)
@@ -276,7 +301,7 @@ public class BleHrmHandler: NSObject {
         if peripheral.state == .connected {
             connectedPeripheral = peripheral
             peripheral.delegate = self
-            peripheral.discoverServices([heartRateServiceUUID])
+            peripheral.discoverServices(servicesToDiscover())
             result(nil)
             return
         }
@@ -401,7 +426,7 @@ extension BleHrmHandler: CBCentralManagerDelegate {
         }
         connectedPeripheral = peripheral
         peripheral.delegate = self
-        peripheral.discoverServices([heartRateServiceUUID])
+        peripheral.discoverServices(servicesToDiscover())
         connectResult?(nil)
         connectResult = nil
     }
@@ -461,6 +486,8 @@ extension BleHrmHandler: CBPeripheralDelegate {
         for service in peripheral.services ?? [] {
             if service.uuid == heartRateServiceUUID {
                 peripheral.discoverCharacteristics([heartRateMeasurementUUID], for: service)
+            } else if motionEnabled && service.uuid == pmdServiceUUID {
+                peripheral.discoverCharacteristics([pmdControlUUID, pmdDataUUID], for: service)
             }
         }
     }
@@ -473,13 +500,36 @@ extension BleHrmHandler: CBPeripheralDelegate {
         for characteristic in service.characteristics ?? [] {
             if characteristic.uuid == heartRateMeasurementUUID {
                 peripheral.setNotifyValue(true, for: characteristic)
+            } else if motionEnabled && (characteristic.uuid == pmdControlUUID || characteristic.uuid == pmdDataUUID) {
+                peripheral.setNotifyValue(true, for: characteristic)
             }
         }
     }
 
+    // Once both measurement-data characteristics notify, write the start
+    // command to the control point (once per connection).
+    public func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+        guard motionEnabled, error == nil, !motionStartSent,
+              let service = peripheral.services?.first(where: { $0.uuid == pmdServiceUUID }),
+              let control = service.characteristics?.first(where: { $0.uuid == pmdControlUUID }),
+              let data = service.characteristics?.first(where: { $0.uuid == pmdDataUUID }),
+              control.isNotifying, data.isNotifying else { return }
+        motionStartSent = true
+        peripheral.writeValue(startAccelCommand(rateHz: motionRateHz), for: control, type: .withResponse)
+    }
+
     public func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard error == nil, characteristic.uuid == heartRateMeasurementUUID,
-              let data = characteristic.value else { return }
+        guard error == nil, let data = characteristic.value else { return }
+        if characteristic.uuid == pmdDataUUID || characteristic.uuid == pmdControlUUID {
+            let event: [String: Any] = [
+                "type": characteristic.uuid == pmdDataUUID ? "pmd_data" : "pmd_control",
+                "bytes": FlutterStandardTypedData(bytes: data),
+                "arrivalMs": Int(Date().timeIntervalSince1970 * 1000),
+            ]
+            eventSink?(event)
+            return
+        }
+        guard characteristic.uuid == heartRateMeasurementUUID else { return }
 
         let sample = parseHeartRateMeasurement(data, peripheral: peripheral)
         eventSink?(sample)

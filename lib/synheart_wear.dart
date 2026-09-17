@@ -172,6 +172,7 @@ export 'src/adapters/garmin_health/garmin_workout_adapter.dart';
 
 // BLE Heart Rate Monitor
 export 'src/adapters/ble_hrm_models.dart';
+export 'src/adapters/ble_motion_models.dart';
 export 'src/adapters/ble_hrm_bridge.dart';
 
 // Cloud vendor providers — vendor link flows (OAuth, credential storage,
