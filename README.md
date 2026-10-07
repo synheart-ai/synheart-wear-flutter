@@ -39,7 +39,7 @@ the `synheart_wear_flutter` target.
 
 ```yaml
 dependencies:
-  synheart_wear: ^0.4.1
+  synheart_wear: ^0.5.1
 ```
 
 ```bash

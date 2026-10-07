@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-07
+
+### Added
+- **BLE: accelerometer stream from Polar chest straps.**
+  `connect(enableMotion: true, motionSampleRateHz: 50)` brings up the
+  measurement-data service beside the heart-rate service on both platforms;
+  `PolarPmdAccel` parses plain and delta-compressed frames into m/s² samples
+  and `BleHrmProvider.onMotion` emits the batches. Devices without the service
+  are unaffected. On Android the set-up requests a 512-byte MTU first (Polar
+  rejects the start command over the default MTU).
+- **Garmin: raw real-time stream.** `GarminHealth.rawRealTimeStream` exposes the
+  device's real-time data as delivered. `GarminAccelerometerData` now carries
+  every sample of a batch with its own timestamp and the sampling rate;
+  `x`/`y`/`z`/`timestamp` still mirror the last sample.
+
 ### Fixed
+- **HealthKit: real-time reads no longer query 30 days of data every tick
+  (iOS).** A streaming read (`isRealTime: true`, no explicit range) fell
+  through to the 30-day default, so a 1 s heart-rate stream ran one HealthKit
+  query per metric type over 30 days plus a 30-minute heartbeat-series query
+  every second, and reported the 30-day mean heart rate as the current one.
+  Streaming reads now cover the last 2 minutes and run at most every 10 s;
+  ticks in between return null, as Android's real-time reads already do.
+  Explicit-range reads are unchanged.
 - **BLE HRM: request a low-latency connection before subscribing to heart-rate
   notifications (Android).** Straps that report RR intervals notify once per
   beat; on the default connection interval the link falls behind above ~70 bpm
@@ -15,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short by 10–40% while the HR value looks normal. Requesting
   `CONNECTION_PRIORITY_HIGH` at subscribe time keeps the link ahead of any human
   heart rate. Applied on both the initial connect and the reconnect path.
+- **Garmin: clearer pairing-failure message.** Both platform pairing failure
+  codes now map to `GarminPairingError` with actionable guidance instead of a
+  raw SDK message; the original error stays on `originalException`.
 
 ## [0.5.0] - 2026-07-01
 

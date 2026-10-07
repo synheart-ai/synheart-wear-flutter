@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:meta/meta.dart';
 import '../../synheart_wear.dart';
 import 'wear_adapter.dart';
 
@@ -10,6 +11,23 @@ import 'wear_adapter.dart';
 ///
 /// Supports heart rate, HRV, steps, calories, and distance metrics.
 class AppleHealthKitAdapter implements WearAdapter {
+  AppleHealthKitAdapter({DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
+
+  /// Real-time reads on iOS run at most this often. HealthKit receives Apple
+  /// Watch samples in batches (seconds to minutes apart), so a faster cadence
+  /// only re-reads the same samples.
+  static const Duration iosRealtimeMinInterval = Duration(seconds: 10);
+
+  /// How far back a real-time read looks. Wide enough to catch a late watch
+  /// batch, narrow enough that the result is the user's *recent* state rather
+  /// than a long-run average.
+  static const Duration iosRealtimeLookback = Duration(minutes: 2);
+
+  DateTime? _lastRealtimeReadAt;
+
   @override
   String get id => 'apple_healthkit';
 
@@ -69,6 +87,19 @@ class AppleHealthKitAdapter implements WearAdapter {
     if (Platform.isAndroid && isRealTime) {
       return null;
     }
+    // A real-time read with no explicit range is a streaming tick. Without
+    // this it fell through to the 30-day default below: every tick (1 s on a
+    // typical stream) ran one HealthKit query per metric type over 30 days,
+    // plus a 30-minute heartbeat-series query, and reported the 30-day mean
+    // heart rate as the current one.
+    final streamingTick = isRealTime && startTime == null && endTime == null;
+    if (streamingTick) {
+      final window = realtimeWindow(_clock(), _lastRealtimeReadAt);
+      if (window == null) return null;
+      _lastRealtimeReadAt = window.end;
+      startTime = window.start;
+      endTime = window.end;
+    }
     try {
       // Use provided time range or default to last 30 days
       final effectiveStartTime =
@@ -90,8 +121,10 @@ class AppleHealthKitAdapter implements WearAdapter {
         if (Platform.isIOS) {
           try {
             final rr = await HealthKitRRChannel.fetchHeartbeatSeries(
-              start: DateTime.now().subtract(const Duration(minutes: 30)),
-              end: DateTime.now(),
+              start: streamingTick
+                  ? effectiveStartTime
+                  : DateTime.now().subtract(const Duration(minutes: 30)),
+              end: streamingTick ? effectiveEndTime : DateTime.now(),
             );
             if (rr.isNotEmpty) {
               return WearMetrics(
@@ -115,5 +148,20 @@ class AppleHealthKitAdapter implements WearAdapter {
       logger.error('HealthKit read error', e);
       return null;
     }
+  }
+
+  /// The range a streaming tick at [now] should read, or null when the
+  /// previous real-time read (at [lastReadAt]) was under
+  /// [iosRealtimeMinInterval] ago and this tick should be skipped.
+  @visibleForTesting
+  static ({DateTime start, DateTime end})? realtimeWindow(
+    DateTime now,
+    DateTime? lastReadAt,
+  ) {
+    if (lastReadAt != null &&
+        now.difference(lastReadAt) < iosRealtimeMinInterval) {
+      return null;
+    }
+    return (start: now.subtract(iosRealtimeLookback), end: now);
   }
 }
