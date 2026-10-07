@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **HealthKit: real-time reads no longer query 30 days of data every tick
+  (iOS).** A streaming read (`isRealTime: true`, no explicit range) fell
+  through to the 30-day default, so a 1 s heart-rate stream ran one HealthKit
+  query per metric type over 30 days plus a 30-minute heartbeat-series query
+  every second, and reported the 30-day mean heart rate as the current one.
+  Streaming reads now cover the last 2 minutes and run at most every 10 s;
+  ticks in between return null, as Android's real-time reads already do.
+  Explicit-range reads are unchanged.
 - **BLE HRM: request a low-latency connection before subscribing to heart-rate
   notifications (Android).** Straps that report RR intervals notify once per
   beat; on the default connection interval the link falls behind above ~70 bpm
