@@ -87,6 +87,28 @@ void main() {
       expect(out.values.single.totalAsleepMinutes, 460);
     });
 
+    test('a session with no stages gives its length and span', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23, 30), _t(29, 6, 45)),
+      ]);
+      final s = out[DateTime(2026, 10, 29)]!;
+      expect(s.totalAsleepMinutes, 435);
+      expect(s.deepMinutes, isNull);
+      expect(s.sleepStart, _t(28, 23, 30));
+      expect(s.sleepEnd, _t(29, 6, 45));
+    });
+
+    test('a session around its stages adds nothing to them', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23), _t(29, 7)),
+        ...night,
+      ]);
+      final s = out.values.single;
+      expect(s.totalAsleepMinutes, 460);
+      expect(s.sleepStart, _t(28, 23));
+      expect(s.sleepEnd, _t(29, 7));
+    });
+
     test('an in-bed-only source gives the in-bed span', () {
       final out = HealthAdapter.summarizeSleepNights([
         _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),

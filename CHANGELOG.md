@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `requestPermissions` returns at once when every requested type is
   already granted. Health Connect showed its permission screen on every
   request, so a host that requested before each read showed it every time.
+- Android reads Health Connect sleep sessions (`SLEEP_SESSION`). A source
+  that writes a session without stages was invisible to every stage type,
+  so its nights were missing; the session now gives the night's span, and
+  its length when nothing inside it says asleep.
 - A night from a source with no sleep stages no longer adds in-bed time to
   asleep time: the total is the asleep minutes, or the in-bed minutes when
   nothing says asleep. Both together gave a night of roughly double length.

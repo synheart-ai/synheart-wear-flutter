@@ -104,12 +104,16 @@ class HealthAdapter {
           //
           // - SLEEP_ASLEEP (Android) / SLEEP_IN_BED (iOS) is the
           //   coarse total fallback when stage data isn't recorded.
+          // - SLEEP_SESSION (Android) is the session itself. A source
+          //   that writes no stages is invisible to every stage type,
+          //   so the session is its only record of the night.
           // - SLEEP_DEEP / SLEEP_REM / SLEEP_LIGHT / SLEEP_AWAKE are
           //   the per-stage segments. Granted-only — devices/apps
           //   that don't write stage data simply return empty
           //   ranges, which we account for downstream.
           if (Platform.isAndroid) {
             healthTypes.addAll([
+              HealthDataType.SLEEP_SESSION,
               HealthDataType.SLEEP_ASLEEP,
               HealthDataType.SLEEP_DEEP,
               HealthDataType.SLEEP_LIGHT,
@@ -589,7 +593,8 @@ class HealthAdapter {
   /// (midnight) of its end; where a day has more than one (a nap), the
   /// longest is kept. Values are minutes — `total` is the asleep total
   /// (deep+light+rem when stages exist, else SLEEP_ASLEEP, else
-  /// SLEEP_IN_BED; in-bed time overlaps asleep time, so they never add).
+  /// SLEEP_IN_BED or the Health Connect session; in-bed time overlaps
+  /// asleep time, so they never add).
   static Future<Map<DateTime, SleepNightSummary>> fetchSleepNights({
     required DateTime start,
     required DateTime end,
@@ -647,6 +652,7 @@ class HealthAdapter {
       switch (p.type) {
         case HealthDataType.SLEEP_ASLEEP:
         case HealthDataType.SLEEP_IN_BED:
+        case HealthDataType.SLEEP_SESSION:
         case HealthDataType.SLEEP_DEEP:
         case HealthDataType.SLEEP_LIGHT:
         case HealthDataType.SLEEP_REM:
@@ -680,7 +686,10 @@ class HealthAdapter {
         case HealthDataType.SLEEP_ASLEEP:
           acc.asleep += mins;
           break;
+        // A Health Connect session spans the night like in-bed time; it
+        // counts only when nothing inside it says asleep.
         case HealthDataType.SLEEP_IN_BED:
+        case HealthDataType.SLEEP_SESSION:
           acc.inBed += mins;
           break;
         case HealthDataType.SLEEP_DEEP:
@@ -1087,7 +1096,8 @@ class _SleepAcc {
   /// Unstaged asleep minutes (SLEEP_ASLEEP).
   double asleep = 0;
 
-  /// In-bed minutes, which overlap the asleep ones rather than add to them.
+  /// In-bed (or Health Connect session) minutes, which overlap the asleep
+  /// ones rather than add to them.
   double inBed = 0;
 
   /// Span of every segment in the night, awake and in-bed included.
