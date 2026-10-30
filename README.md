@@ -204,26 +204,20 @@ print(metrics.batteryLevel);                     // 0.82
 Add to `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
-<!-- Health Connect Permissions -->
+<!-- Health Connect Permissions: read only, the SDK never writes -->
 <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
-<uses-permission android:name="android.permission.health.WRITE_HEART_RATE"/>
-<!-- Resting HR: without these, fetchOvernightPhysiology reports no resting HR -->
+<!-- Resting HR: without it, fetchOvernightPhysiology reports no resting HR -->
 <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE"/>
-<uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE"/>
 <!-- Exercise sessions (fetchActiveMinutes): the plugin also reads distance,
      total calories and steps inside each session -->
 <uses-permission android:name="android.permission.health.READ_EXERCISE"/>
-<uses-permission android:name="android.permission.health.WRITE_EXERCISE"/>
 <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED"/>
-<uses-permission android:name="android.permission.health.WRITE_TOTAL_CALORIES_BURNED"/>
 <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY"/>
-<uses-permission android:name="android.permission.health.WRITE_HEART_RATE_VARIABILITY"/>
 <uses-permission android:name="android.permission.health.READ_STEPS"/>
-<uses-permission android:name="android.permission.health.WRITE_STEPS"/>
 <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED"/>
-<uses-permission android:name="android.permission.health.WRITE_ACTIVE_CALORIES_BURNED"/>
 <uses-permission android:name="android.permission.health.READ_DISTANCE"/>
-<uses-permission android:name="android.permission.health.WRITE_DISTANCE"/>
+<!-- Sleep sessions and stages (fetchSleepNights) -->
+<uses-permission android:name="android.permission.health.READ_SLEEP"/>
 
 <!-- Health Connect Package Query -->
 <queries>
@@ -263,10 +257,10 @@ Add to `ios/Runner/Info.plist`:
 ```xml
 <key>NSHealthShareUsageDescription</key>
 <string>This app needs access to your health data to provide insights.</string>
-
-<key>NSHealthUpdateUsageDescription</key>
-<string>This app needs permission to update your health data.</string>
 ```
+
+The SDK only reads health data, so `NSHealthUpdateUsageDescription` is not
+needed.
 
 ## ⚠️ Platform Limitations
 

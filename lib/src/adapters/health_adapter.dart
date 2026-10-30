@@ -180,7 +180,8 @@ class HealthAdapter {
   }
 
   /// Request permissions using health package (v13.2.1 API)
-  /// Always requests READ_WRITE access for all types.
+  /// Requests READ access only: the SDK never writes health data. Returns at
+  /// once when every type is already granted.
   ///
   /// Serializes concurrent calls — if a request is already in flight,
   /// subsequent callers wait for the same result instead of triggering a
@@ -683,14 +684,16 @@ class HealthAdapter {
       }
 
       switch (p.type) {
+        // Kept as spans, not summed: two sources recording the same night
+        // overlap, and a sum would count it twice.
         case HealthDataType.SLEEP_ASLEEP:
-          acc.asleep += mins;
+          acc.asleepSpans.add((p.dateFrom, p.dateTo));
           break;
         // A Health Connect session spans the night like in-bed time; it
         // counts only when nothing inside it says asleep.
         case HealthDataType.SLEEP_IN_BED:
         case HealthDataType.SLEEP_SESSION:
-          acc.inBed += mins;
+          acc.inBedSpans.add((p.dateFrom, p.dateTo));
           break;
         case HealthDataType.SLEEP_DEEP:
           acc.deep += mins;
@@ -1093,12 +1096,12 @@ class _SleepAcc {
   double rem = 0;
   double awake = 0;
 
-  /// Unstaged asleep minutes (SLEEP_ASLEEP).
-  double asleep = 0;
+  /// Unstaged asleep segments (SLEEP_ASLEEP).
+  final asleepSpans = <(DateTime, DateTime)>[];
 
-  /// In-bed (or Health Connect session) minutes, which overlap the asleep
+  /// In-bed (or Health Connect session) segments, which overlap the asleep
   /// ones rather than add to them.
-  double inBed = 0;
+  final inBedSpans = <(DateTime, DateTime)>[];
 
   /// Span of every segment in the night, awake and in-bed included.
   DateTime? start;
@@ -1110,7 +1113,26 @@ class _SleepAcc {
   double get asleepMinutes {
     final stageTotal = deep + light + rem;
     if (stageTotal > 0) return stageTotal;
-    return asleep > 0 ? asleep : inBed;
+    final asleep = _unionMinutes(asleepSpans);
+    return asleep > 0 ? asleep : _unionMinutes(inBedSpans);
+  }
+
+  /// Minutes covered by [spans], each counted once where they overlap.
+  static double _unionMinutes(List<(DateTime, DateTime)> spans) {
+    if (spans.isEmpty) return 0;
+    final sorted = [...spans]..sort((a, b) => a.$1.compareTo(b.$1));
+    var total = Duration.zero;
+    var (from, to) = sorted.first;
+    for (final (f, t) in sorted.skip(1)) {
+      if (f.isAfter(to)) {
+        total += to.difference(from);
+        (from, to) = (f, t);
+      } else if (t.isAfter(to)) {
+        to = t;
+      }
+    }
+    total += to.difference(from);
+    return total.inMinutes.toDouble();
   }
 
   /// Earliest start of any sleep segment (in-bed / awake / stage) — the

@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A night from a source with no sleep stages no longer adds in-bed time to
   asleep time: the total is the asleep minutes, or the in-bed minutes when
   nothing says asleep. Both together gave a night of roughly double length.
+  Overlapping records of the same kind, such as two apps' sessions for one
+  night, count the time they cover once instead of adding up.
+
+### Docs
+- README: the Android manifest lists read permissions only, adds
+  `READ_SLEEP` (sleep reads need it), and iOS no longer needs
+  `NSHealthUpdateUsageDescription`.
 
 ## [0.6.0] - 2026-10-30
 

@@ -109,6 +109,31 @@ void main() {
       expect(s.sleepEnd, _t(29, 7));
     });
 
+    test('two sources recording the same night count it once', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23), _t(29, 7)),
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23, 10), _t(29, 6, 50)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('overlapping asleep records count the time they cover', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        // 23:00–03:00 and 02:00–07:00 cover 23:00–07:00.
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 3)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(29, 2), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('a gap between asleep records is not counted', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 2)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(29, 2, 30), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 450);
+    });
+
     test('an in-bed-only source gives the in-bed span', () {
       final out = HealthAdapter.summarizeSleepNights([
         _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),
