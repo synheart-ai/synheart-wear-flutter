@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 ### Added
 - `OvernightPhysiologySummary.overnightHrBpm`: the mean HR while asleep, from
   the HR samples inside the night's asleep span. Pass the nights from
