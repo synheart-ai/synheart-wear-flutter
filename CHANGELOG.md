@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write on every type, but the SDK never writes; HealthKit refuses to share
   Apple exercise time, so a request with `PermissionType.exercise` failed on
   iOS, and Android hosts were asked for write access they never use.
+- `requestPermissions` returns at once when every requested type is
+  already granted. Health Connect showed its permission screen on every
+  request, so a host that requested before each read showed it every time.
 - A night from a source with no sleep stages no longer adds in-bed time to
   asleep time: the total is the asleep minutes, or the in-bed minutes when
   nothing says asleep. Both together gave a night of roughly double length.

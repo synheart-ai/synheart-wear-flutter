@@ -211,13 +211,25 @@ class HealthAdapter {
 
       // Read only: the SDK never writes, and HealthKit refuses to share
       // some types (Apple exercise time), failing the whole request.
-      final defaultPermissions = List<HealthDataAccess>.filled(
+      final readAccess = List<HealthDataAccess>.filled(
         healthTypes.length,
         HealthDataAccess.READ,
       );
+      // Health Connect shows its permission screen on every request, even
+      // when everything asked for is granted, so skip the request then.
+      // iOS reports read access as unknown (null) and goes on to request,
+      // which HealthKit shows only once.
+      final alreadyGranted = await _health.hasPermissions(
+        healthTypes,
+        permissions: readAccess,
+      );
+      if (alreadyGranted == true) {
+        _permissionCompleter!.complete(true);
+        return true;
+      }
       final granted = await _health.requestAuthorization(
         healthTypes,
-        permissions: defaultPermissions,
+        permissions: readAccess,
       );
       _permissionCompleter!.complete(granted);
       return granted;
