@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-30
+
 ### Fixed
 - `requestPermissions` asks for read access only. It asked for read and
   write on every type, but the SDK never writes; HealthKit refuses to share
