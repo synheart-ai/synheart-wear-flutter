@@ -40,6 +40,11 @@ enum PermissionType {
   /// Stress level data
   stress,
 
+  /// Exercise: Apple exercise time on iOS, Health Connect exercise sessions
+  /// on Android (which also need distance, total calories and steps, read
+  /// inside each session). Feeds [HealthAdapter.fetchActiveMinutes].
+  exercise,
+
   /// All available permissions
   all,
 }

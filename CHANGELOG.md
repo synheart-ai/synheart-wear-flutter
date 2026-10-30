@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
+### Added
+- `OvernightPhysiologySummary.overnightHrBpm`: the mean HR while asleep, from
+  the HR samples inside the night's asleep span. Pass the nights from
+  `fetchSleepNights` as `fetchOvernightPhysiology(sleepNights: …)` to get it.
+- `SleepNightSummary.sleepStart` / `sleepEnd`: the night's asleep span (the
+  in-bed span for a source with no asleep stage).
+- Android reads Health Connect's resting heart rate. `PermissionType.heartRate`
+  now requests it on both platforms; declare
+  `android.permission.health.READ_RESTING_HEART_RATE` to have it granted.
+- `HealthAdapter.fetchActiveMinutes`: active minutes per local day — Apple
+  exercise time on iOS, Health Connect exercise sessions on Android — split at
+  local midnight; a day with no record is absent. Request it with the new
+  `PermissionType.exercise`. On Android declare `READ_EXERCISE`,
+  `READ_DISTANCE`, `READ_TOTAL_CALORIES_BURNED` and `READ_STEPS`: the plugin
+  reads all four for each session, and one missing fails the read. A switch
+  over `PermissionType` needs the new case.
+
+### Changed
+- **`OvernightPhysiologySummary.restingHrBpm` is only a real resting-HR
+  record.** It fell back to the median of the day's HR samples, which on
+  Android, with no resting-HR read, was always the case: a daytime figure
+  (108 bpm against a sleeping HR in the 50s) reported as resting HR. A day
+  without a resting-HR record now has none.
+- `fetchSleepNights` groups segments into nights before keying them by wake
+  day, so a night that crosses midnight is no longer split across two days,
+  and a nap no longer adds to the night's totals: the longest sleep per day
+  is the night.
+
 ## [0.5.1] - 2026-10-07
 
 ### Added
