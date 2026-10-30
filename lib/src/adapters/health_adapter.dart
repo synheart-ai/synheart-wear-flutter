@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:health/health.dart';
+import 'package:meta/meta.dart';
 
 import '../core/consent_manager.dart';
 import '../core/logger.dart';
@@ -63,14 +64,14 @@ class HealthAdapter {
       switch (permission) {
         case PermissionType.heartRate:
           healthTypes.add(HealthDataType.HEART_RATE);
-          // HealthKit exposes a separate `RESTING_HEART_RATE` quantity;
-          // bundle it under heartRate so the auth dialog asks once and
-          // [fetchOvernightPhysiology] can read RHR without a second
-          // round-trip. Health Connect does not have a stable resting
-          // HR type today, so Android skips it.
-          if (Platform.isIOS) {
-            healthTypes.add(HealthDataType.RESTING_HEART_RATE);
-          }
+          // Resting HR is its own type on both platforms (HealthKit's
+          // quantity, Health Connect's RestingHeartRateRecord); bundled
+          // under heartRate so the dialog asks once. On Android it is only
+          // granted when the host declares
+          // `android.permission.health.READ_RESTING_HEART_RATE`; the
+          // request still succeeds without it, and
+          // [fetchOvernightPhysiology] then reads no resting HR.
+          healthTypes.add(HealthDataType.RESTING_HEART_RATE);
           break;
         case PermissionType.heartRateVariability:
           // Use platform-specific HRV types
@@ -123,6 +124,20 @@ class HealthAdapter {
               HealthDataType.SLEEP_REM,
               HealthDataType.SLEEP_AWAKE,
             ]);
+          }
+          break;
+        case PermissionType.exercise:
+          if (Platform.isAndroid) {
+            // The plugin reads distance, total calories and steps inside
+            // each exercise session; one ungranted type fails the read.
+            healthTypes.addAll([
+              HealthDataType.WORKOUT,
+              HealthDataType.DISTANCE_DELTA,
+              HealthDataType.TOTAL_CALORIES_BURNED,
+              HealthDataType.STEPS,
+            ]);
+          } else {
+            healthTypes.add(HealthDataType.EXERCISE_TIME);
           }
           break;
         case PermissionType.stress:
@@ -554,10 +569,12 @@ class HealthAdapter {
   /// and groups the resulting points by the calendar day the
   /// sleep session ended on.
   ///
-  /// Returned map keys are local-time day-anchors (midnight) for
-  /// the sleep session's end. Values are minutes — `total` is the
-  /// asleep total (deep+light+rem when stages exist, else
-  /// SLEEP_ASLEEP/SLEEP_IN_BED).
+  /// Segments are grouped into nights first — blocks less than 90
+  /// minutes apart are one night — so a night that crosses midnight
+  /// stays whole. Each night is keyed by the local-time day-anchor
+  /// (midnight) of its end; where a day has more than one (a nap), the
+  /// longest is kept. Values are minutes — `total` is the asleep total
+  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP/SLEEP_IN_BED).
   static Future<Map<DateTime, SleepNightSummary>> fetchSleepNights({
     required DateTime start,
     required DateTime end,
@@ -583,18 +600,31 @@ class HealthAdapter {
       return const {};
     }
     if (Platform.isAndroid) _lastReadAt = DateTime.now();
+    return summarizeSleepNights(points);
+  }
 
-    final out = <DateTime, _SleepAcc>{};
+  /// Groups sleep segments into nights and summarizes the main night per
+  /// wake day; the pure half of [fetchSleepNights].
+  @visibleForTesting
+  static Map<DateTime, SleepNightSummary> summarizeSleepNights(
+    List<HealthDataPoint> points,
+  ) {
     DateTime dayKey(DateTime t) {
       final l = t.toLocal();
       return DateTime(l.year, l.month, l.day);
     }
 
-    for (final p in points) {
+    final sorted = points.where((p) => p.dateTo.isAfter(p.dateFrom)).toList()
+      ..sort((a, b) => a.dateFrom.compareTo(b.dateFrom));
+    final nights = <_SleepAcc>[];
+    for (final p in sorted) {
       final mins = p.dateTo.difference(p.dateFrom).inMinutes.toDouble();
-      if (mins <= 0) continue;
-      final key = dayKey(p.dateTo);
-      final acc = out.putIfAbsent(key, _SleepAcc.new);
+      final last = nights.isEmpty ? null : nights.last;
+      final acc = last != null && p.dateFrom.difference(last.end!) <= _nightGap
+          ? last
+          : (_SleepAcc()..start = p.dateFrom);
+      if (!identical(acc, last)) nights.add(acc);
+      if (acc.end == null || p.dateTo.isAfter(acc.end!)) acc.end = p.dateTo;
 
       // Onset-latency anchors: the in-bed window starts at the earliest of any
       // sleep segment; sleep onset is the earliest non-awake stage. Latency is
@@ -623,6 +653,9 @@ class HealthAdapter {
               p.dateFrom.isBefore(acc.firstSleepStart!)) {
             acc.firstSleepStart = p.dateFrom;
           }
+          if (acc.lastSleepEnd == null || p.dateTo.isAfter(acc.lastSleepEnd!)) {
+            acc.lastSleepEnd = p.dateTo;
+          }
           break;
         default:
           break;
@@ -650,9 +683,18 @@ class HealthAdapter {
       }
     }
 
-    return out.map((day, acc) {
-      final stageTotal = acc.deep + acc.light + acc.rem;
-      final total = stageTotal > 0 ? stageTotal : acc.totalFallback;
+    // The main night per wake day: the longest, so a nap never displaces it.
+    final byDay = <DateTime, _SleepAcc>{};
+    for (final night in nights) {
+      final key = dayKey(night.end!);
+      final held = byDay[key];
+      if (held == null || night.asleepMinutes > held.asleepMinutes) {
+        byDay[key] = night;
+      }
+    }
+
+    return byDay.map((day, acc) {
+      final total = acc.asleepMinutes;
       // Onset latency = first asleep stage − in-bed start, when both anchors
       // exist and sleep began after lights-out. Null otherwise (don't fabricate).
       double? latency;
@@ -670,10 +712,95 @@ class HealthAdapter {
           remMinutes: acc.rem > 0 ? acc.rem : null,
           awakeMinutes: acc.awake,
           sleepLatencyMinutes: latency,
+          // Asleep span; a source with no asleep stage (in-bed only) gives
+          // the in-bed span, still recorded timing rather than a guess.
+          sleepStart: acc.firstSleepStart ?? acc.start,
+          sleepEnd: acc.lastSleepEnd ?? acc.end,
         ),
       );
     });
   }
+
+  /// Active minutes per local day: Apple exercise time on iOS, the length of
+  /// Health Connect exercise sessions on Android. Each is split at local
+  /// midnight, so a session that crosses it counts on both days. Days with no
+  /// record are absent, never zero. Needs [PermissionType.exercise].
+  static Future<Map<DateTime, double>> fetchActiveMinutes({
+    required DateTime start,
+    required DateTime end,
+    bool bypassThrottle = false,
+  }) async {
+    if (_shouldThrottleAndroid(bypass: bypassThrottle)) {
+      logDebug('HealthAdapter.fetchActiveMinutes throttled');
+      return const {};
+    }
+    await _ensureConfigured();
+    List<HealthDataPoint> points;
+    try {
+      points = await _health.getHealthDataFromTypes(
+        startTime: start,
+        endTime: end,
+        types: [
+          Platform.isAndroid
+              ? HealthDataType.WORKOUT
+              : HealthDataType.EXERCISE_TIME,
+        ],
+      );
+    } catch (e) {
+      logError('fetchActiveMinutes read failed', e);
+      return const {};
+    }
+    if (Platform.isAndroid) _lastReadAt = DateTime.now();
+    return activeMinutesByDay(points);
+  }
+
+  /// Splits each record's span at local midnight and sums the minutes per
+  /// local day; the pure half of [fetchActiveMinutes].
+  @visibleForTesting
+  static Map<DateTime, double> activeMinutesByDay(
+    List<HealthDataPoint> points,
+  ) {
+    final out = <DateTime, double>{};
+    for (final p in points) {
+      var from = p.dateFrom.toLocal();
+      final to = p.dateTo.toLocal();
+      while (from.isBefore(to)) {
+        final day = DateTime(from.year, from.month, from.day);
+        final next = DateTime(from.year, from.month, from.day + 1);
+        final segEnd = to.isBefore(next) ? to : next;
+        out[day] = (out[day] ?? 0) + segEnd.difference(from).inSeconds / 60.0;
+        from = segEnd;
+      }
+    }
+    return out;
+  }
+
+  /// Mean of the HR [samples] inside [night]'s asleep span; null without the
+  /// span or with too few samples inside it.
+  @visibleForTesting
+  static double? asleepMeanHr(
+    List<(DateTime, double)> samples,
+    SleepNightSummary? night,
+  ) {
+    final from = night?.sleepStart;
+    final to = night?.sleepEnd;
+    if (from == null || to == null) return null;
+    var sum = 0.0;
+    var n = 0;
+    for (final (t, bpm) in samples) {
+      if (t.isBefore(from) || t.isAfter(to)) continue;
+      sum += bpm;
+      n += 1;
+    }
+    return n < _minAsleepHrSamples ? null : sum / n;
+  }
+
+  /// Sleep blocks closer than this belong to one night (a wake-up in the
+  /// night); further apart, a separate sleep (a nap).
+  static const Duration _nightGap = Duration(minutes: 90);
+
+  /// Fewer asleep HR samples than this is too thin for a nightly mean.
+  static const int _minAsleepHrSamples = 6;
 
   /// Per-night overnight physiology summary, used alongside
   /// [fetchSleepNights] to attach HRV / resting HR to the matching
@@ -687,11 +814,17 @@ class HealthAdapter {
   ///
   /// Both numbers are aggregated as the nightly median to suppress
   /// outlier samples (a single 200ms RR misread can blow up a mean).
+  ///
+  /// Resting HR comes only from the platform's resting-HR record; a day
+  /// without one has none. Pass [sleepNights] (from [fetchSleepNights]) to
+  /// also get `overnightHrBpm`, the mean of the HR samples inside each
+  /// night's asleep span.
   static Future<Map<DateTime, OvernightPhysiologySummary>>
   fetchOvernightPhysiology({
     required DateTime start,
     required DateTime end,
     bool bypassThrottle = false,
+    Map<DateTime, SleepNightSummary>? sleepNights,
   }) async {
     if (_shouldThrottleAndroid(bypass: bypassThrottle)) {
       logDebug('HealthAdapter.fetchOvernightPhysiology throttled');
@@ -709,11 +842,8 @@ class HealthAdapter {
         HealthDataType.HEART_RATE_VARIABILITY_SDNN
       else
         HealthDataType.HEART_RATE_VARIABILITY_RMSSD,
-      // RestingHeartRate is iOS-only on the `health` package today;
-      // Health Connect doesn't expose a stable type for it. We still
-      // request it; if absent the fallback below derives it from the
-      // overnight HR samples.
-      if (Platform.isIOS) HealthDataType.RESTING_HEART_RATE,
+      // Resting HR is read separately below: on Android the host may not
+      // hold its permission, and one ungranted type fails the whole read.
       // Daily step total — feeds the engine's `motion.steps_est`
       // baseline. Available on both platforms.
       HealthDataType.STEPS,
@@ -729,6 +859,18 @@ class HealthAdapter {
       logError('fetchOvernightPhysiology read failed', e);
       return const {};
     }
+    try {
+      points = [
+        ...points,
+        ...await _health.getHealthDataFromTypes(
+          startTime: start,
+          endTime: end,
+          types: const [HealthDataType.RESTING_HEART_RATE],
+        ),
+      ];
+    } catch (e) {
+      logDebug('fetchOvernightPhysiology: no resting HR read ($e)');
+    }
     if (Platform.isAndroid) _lastReadAt = DateTime.now();
 
     DateTime dayKey(DateTime t) {
@@ -736,6 +878,7 @@ class HealthAdapter {
       return DateTime(l.year, l.month, l.day);
     }
 
+    final hrSamples = <(DateTime, double)>[];
     final hrvByDay = <DateTime, List<double>>{};
     final rhrByDay = <DateTime, List<double>>{};
     final hrByDay = <DateTime, List<double>>{};
@@ -762,6 +905,7 @@ class HealthAdapter {
           break;
         case HealthDataType.HEART_RATE:
           hrByDay.putIfAbsent(key, () => <double>[]).add(n);
+          hrSamples.add((p.dateFrom, n));
           break;
         case HealthDataType.STEPS:
           // Steps are cumulative bucketed samples — sum, don't median.
@@ -806,16 +950,21 @@ class HealthAdapter {
     final out = <DateTime, OvernightPhysiologySummary>{};
     for (final day in allDays) {
       final hrv = medianOf(hrvByDay[day]);
-      // Prefer a real RestingHeartRate sample; otherwise the median
-      // of overnight HR samples is a reasonable proxy on platforms
-      // that don't surface RHR natively.
-      final rhr = medianOf(rhrByDay[day]) ?? medianOf(hrByDay[day]);
+      // Only a real resting-HR record. The day's HR median is not one: it
+      // is dominated by waking activity (it read 108 bpm on a watch whose
+      // sleeping HR is in the 50s), so it is never offered as resting HR.
+      final rhr = medianOf(rhrByDay[day]);
+      final asleepHr = asleepMeanHr(hrSamples, sleepNights?[day]);
       // Std-bpm of the day's HR trace — feeds the engine's
       // `hrv.hr_std_bpm` baseline. Coarser sibling to RMSSD/SDNN that
       // works from a 1Hz HR trace alone.
       final hrStd = hrStdOf(hrByDay[day]);
       final steps = stepsByDay[day];
-      if (hrv == null && rhr == null && hrStd == null && steps == null) {
+      if (hrv == null &&
+          rhr == null &&
+          asleepHr == null &&
+          hrStd == null &&
+          steps == null) {
         continue;
       }
       // iOS HealthKit only ships HRV under HKHeartRateVariabilitySDNN
@@ -833,6 +982,7 @@ class HealthAdapter {
         hrStdBpm: hrStd,
         stepsCount: steps,
         restingHrBpm: rhr,
+        overnightHrBpm: asleepHr,
       );
     }
     return out;
@@ -859,13 +1009,21 @@ class OvernightPhysiologySummary {
   final double? hrvSdnnMs;
   final double? hrStdBpm;
   final double? stepsCount;
+
+  /// The platform's resting-HR record for the day; null without one.
   final double? restingHrBpm;
+
+  /// Mean HR while asleep, from the HR samples inside the night's asleep
+  /// span; null unless [HealthAdapter.fetchOvernightPhysiology] was given
+  /// the night.
+  final double? overnightHrBpm;
   const OvernightPhysiologySummary({
     this.hrvRmssdMs,
     this.hrvSdnnMs,
     this.hrStdBpm,
     this.stepsCount,
     this.restingHrBpm,
+    this.overnightHrBpm,
   });
 }
 
@@ -885,6 +1043,11 @@ class SleepNightSummary {
   /// SLEEP_ASLEEP block with no leading in-bed/awake segment).
   final double? sleepLatencyMinutes;
 
+  /// Start and end of the night's asleep span (the in-bed span for a source
+  /// that records no asleep stage). Null only for a summary built by hand.
+  final DateTime? sleepStart;
+  final DateTime? sleepEnd;
+
   const SleepNightSummary({
     required this.totalAsleepMinutes,
     this.deepMinutes,
@@ -892,6 +1055,8 @@ class SleepNightSummary {
     this.remMinutes,
     required this.awakeMinutes,
     this.sleepLatencyMinutes,
+    this.sleepStart,
+    this.sleepEnd,
   });
 }
 
@@ -902,6 +1067,18 @@ class _SleepAcc {
   double rem = 0;
   double awake = 0;
   double totalFallback = 0;
+
+  /// Span of every segment in the night, awake and in-bed included.
+  DateTime? start;
+  DateTime? end;
+
+  /// End of the last asleep segment.
+  DateTime? lastSleepEnd;
+
+  double get asleepMinutes {
+    final stageTotal = deep + light + rem;
+    return stageTotal > 0 ? stageTotal : totalFallback;
+  }
 
   /// Earliest start of any sleep segment (in-bed / awake / stage) — the
   /// "lights out" anchor.

@@ -207,6 +207,15 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 <!-- Health Connect Permissions -->
 <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
 <uses-permission android:name="android.permission.health.WRITE_HEART_RATE"/>
+<!-- Resting HR: without these, fetchOvernightPhysiology reports no resting HR -->
+<uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE"/>
+<uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE"/>
+<!-- Exercise sessions (fetchActiveMinutes): the plugin also reads distance,
+     total calories and steps inside each session -->
+<uses-permission android:name="android.permission.health.READ_EXERCISE"/>
+<uses-permission android:name="android.permission.health.WRITE_EXERCISE"/>
+<uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED"/>
+<uses-permission android:name="android.permission.health.WRITE_TOTAL_CALORIES_BURNED"/>
 <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY"/>
 <uses-permission android:name="android.permission.health.WRITE_HEART_RATE_VARIABILITY"/>
 <uses-permission android:name="android.permission.health.READ_STEPS"/>
