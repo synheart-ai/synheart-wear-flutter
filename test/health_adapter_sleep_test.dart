@@ -63,6 +63,30 @@ void main() {
       expect(s.sleepEnd, _t(29, 6, 30));
     });
 
+    test('in-bed time does not add to asleep time', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 22, 30), _t(29, 6, 30)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 6)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 420);
+    });
+
+    test('in-bed time counts only when nothing says asleep', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('stages win over unstaged asleep and in-bed time', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 22, 30), _t(29, 7, 30)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 7)),
+        ...night,
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 460);
+    });
+
     test('an in-bed-only source gives the in-bed span', () {
       final out = HealthAdapter.summarizeSleepNights([
         _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),

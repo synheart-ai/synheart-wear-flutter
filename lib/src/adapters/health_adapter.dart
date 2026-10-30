@@ -209,9 +209,11 @@ class HealthAdapter {
     try {
       await _ensureConfigured();
 
+      // Read only: the SDK never writes, and HealthKit refuses to share
+      // some types (Apple exercise time), failing the whole request.
       final defaultPermissions = List<HealthDataAccess>.filled(
         healthTypes.length,
-        HealthDataAccess.READ_WRITE,
+        HealthDataAccess.READ,
       );
       final granted = await _health.requestAuthorization(
         healthTypes,
@@ -574,7 +576,8 @@ class HealthAdapter {
   /// stays whole. Each night is keyed by the local-time day-anchor
   /// (midnight) of its end; where a day has more than one (a nap), the
   /// longest is kept. Values are minutes — `total` is the asleep total
-  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP/SLEEP_IN_BED).
+  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP, else
+  /// SLEEP_IN_BED; in-bed time overlaps asleep time, so they never add).
   static Future<Map<DateTime, SleepNightSummary>> fetchSleepNights({
     required DateTime start,
     required DateTime end,
@@ -663,8 +666,10 @@ class HealthAdapter {
 
       switch (p.type) {
         case HealthDataType.SLEEP_ASLEEP:
+          acc.asleep += mins;
+          break;
         case HealthDataType.SLEEP_IN_BED:
-          acc.totalFallback += mins;
+          acc.inBed += mins;
           break;
         case HealthDataType.SLEEP_DEEP:
           acc.deep += mins;
@@ -1066,7 +1071,12 @@ class _SleepAcc {
   double light = 0;
   double rem = 0;
   double awake = 0;
-  double totalFallback = 0;
+
+  /// Unstaged asleep minutes (SLEEP_ASLEEP).
+  double asleep = 0;
+
+  /// In-bed minutes, which overlap the asleep ones rather than add to them.
+  double inBed = 0;
 
   /// Span of every segment in the night, awake and in-bed included.
   DateTime? start;
@@ -1077,7 +1087,8 @@ class _SleepAcc {
 
   double get asleepMinutes {
     final stageTotal = deep + light + rem;
-    return stageTotal > 0 ? stageTotal : totalFallback;
+    if (stageTotal > 0) return stageTotal;
+    return asleep > 0 ? asleep : inBed;
   }
 
   /// Earliest start of any sleep segment (in-bed / awake / stage) — the
