@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-30
+
+### Fixed
+- `requestPermissions` asks for read access only. It asked for read and
+  write on every type, but the SDK never writes; HealthKit refuses to share
+  Apple exercise time, so a request with `PermissionType.exercise` failed on
+  iOS, and Android hosts were asked for write access they never use.
+- `requestPermissions` returns at once when every requested type is
+  already granted. Health Connect showed its permission screen on every
+  request, so a host that requested before each read showed it every time.
+- Android reads Health Connect sleep sessions (`SLEEP_SESSION`). A source
+  that writes a session without stages was invisible to every stage type,
+  so its nights were missing; the session now gives the night's span, and
+  its length when nothing inside it says asleep.
+- A night from a source with no sleep stages no longer adds in-bed time to
+  asleep time: the total is the asleep minutes, or the in-bed minutes when
+  nothing says asleep. Both together gave a night of roughly double length.
+  Overlapping asleep, in-bed and session records, such as two apps'
+  sessions for one night, count the time they cover once instead of adding
+  up. Overlapping sleep stages from two sources are still added.
+
+### Docs
+- README: the Android manifest lists read permissions only, adds
+  `READ_SLEEP` (sleep reads need it), and iOS no longer needs
+  `NSHealthUpdateUsageDescription`.
+
 ## [0.6.0] - 2026-10-30
 
 ### Added

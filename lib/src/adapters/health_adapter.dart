@@ -104,12 +104,16 @@ class HealthAdapter {
           //
           // - SLEEP_ASLEEP (Android) / SLEEP_IN_BED (iOS) is the
           //   coarse total fallback when stage data isn't recorded.
+          // - SLEEP_SESSION (Android) is the session itself. A source
+          //   that writes no stages is invisible to every stage type,
+          //   so the session is its only record of the night.
           // - SLEEP_DEEP / SLEEP_REM / SLEEP_LIGHT / SLEEP_AWAKE are
           //   the per-stage segments. Granted-only — devices/apps
           //   that don't write stage data simply return empty
           //   ranges, which we account for downstream.
           if (Platform.isAndroid) {
             healthTypes.addAll([
+              HealthDataType.SLEEP_SESSION,
               HealthDataType.SLEEP_ASLEEP,
               HealthDataType.SLEEP_DEEP,
               HealthDataType.SLEEP_LIGHT,
@@ -176,7 +180,8 @@ class HealthAdapter {
   }
 
   /// Request permissions using health package (v13.2.1 API)
-  /// Always requests READ_WRITE access for all types.
+  /// Requests READ access only: the SDK never writes health data. Returns at
+  /// once when every type is already granted.
   ///
   /// Serializes concurrent calls — if a request is already in flight,
   /// subsequent callers wait for the same result instead of triggering a
@@ -209,13 +214,27 @@ class HealthAdapter {
     try {
       await _ensureConfigured();
 
-      final defaultPermissions = List<HealthDataAccess>.filled(
+      // Read only: the SDK never writes, and HealthKit refuses to share
+      // some types (Apple exercise time), failing the whole request.
+      final readAccess = List<HealthDataAccess>.filled(
         healthTypes.length,
-        HealthDataAccess.READ_WRITE,
+        HealthDataAccess.READ,
       );
+      // Health Connect shows its permission screen on every request, even
+      // when everything asked for is granted, so skip the request then.
+      // iOS reports read access as unknown (null) and goes on to request,
+      // which HealthKit shows only once.
+      final alreadyGranted = await _health.hasPermissions(
+        healthTypes,
+        permissions: readAccess,
+      );
+      if (alreadyGranted == true) {
+        _permissionCompleter!.complete(true);
+        return true;
+      }
       final granted = await _health.requestAuthorization(
         healthTypes,
-        permissions: defaultPermissions,
+        permissions: readAccess,
       );
       _permissionCompleter!.complete(granted);
       return granted;
@@ -574,7 +593,9 @@ class HealthAdapter {
   /// stays whole. Each night is keyed by the local-time day-anchor
   /// (midnight) of its end; where a day has more than one (a nap), the
   /// longest is kept. Values are minutes — `total` is the asleep total
-  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP/SLEEP_IN_BED).
+  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP, else
+  /// SLEEP_IN_BED or the Health Connect session; in-bed time overlaps
+  /// asleep time, so they never add).
   static Future<Map<DateTime, SleepNightSummary>> fetchSleepNights({
     required DateTime start,
     required DateTime end,
@@ -632,6 +653,7 @@ class HealthAdapter {
       switch (p.type) {
         case HealthDataType.SLEEP_ASLEEP:
         case HealthDataType.SLEEP_IN_BED:
+        case HealthDataType.SLEEP_SESSION:
         case HealthDataType.SLEEP_DEEP:
         case HealthDataType.SLEEP_LIGHT:
         case HealthDataType.SLEEP_REM:
@@ -662,9 +684,16 @@ class HealthAdapter {
       }
 
       switch (p.type) {
+        // Kept as spans, not summed: two sources recording the same night
+        // overlap, and a sum would count it twice.
         case HealthDataType.SLEEP_ASLEEP:
+          acc.asleepSpans.add((p.dateFrom, p.dateTo));
+          break;
+        // A Health Connect session spans the night like in-bed time; it
+        // counts only when nothing inside it says asleep.
         case HealthDataType.SLEEP_IN_BED:
-          acc.totalFallback += mins;
+        case HealthDataType.SLEEP_SESSION:
+          acc.inBedSpans.add((p.dateFrom, p.dateTo));
           break;
         case HealthDataType.SLEEP_DEEP:
           acc.deep += mins;
@@ -1066,7 +1095,13 @@ class _SleepAcc {
   double light = 0;
   double rem = 0;
   double awake = 0;
-  double totalFallback = 0;
+
+  /// Unstaged asleep segments (SLEEP_ASLEEP).
+  final asleepSpans = <(DateTime, DateTime)>[];
+
+  /// In-bed (or Health Connect session) segments, which overlap the asleep
+  /// ones rather than add to them.
+  final inBedSpans = <(DateTime, DateTime)>[];
 
   /// Span of every segment in the night, awake and in-bed included.
   DateTime? start;
@@ -1077,7 +1112,27 @@ class _SleepAcc {
 
   double get asleepMinutes {
     final stageTotal = deep + light + rem;
-    return stageTotal > 0 ? stageTotal : totalFallback;
+    if (stageTotal > 0) return stageTotal;
+    final asleep = _unionMinutes(asleepSpans);
+    return asleep > 0 ? asleep : _unionMinutes(inBedSpans);
+  }
+
+  /// Minutes covered by [spans], each counted once where they overlap.
+  static double _unionMinutes(List<(DateTime, DateTime)> spans) {
+    if (spans.isEmpty) return 0;
+    final sorted = [...spans]..sort((a, b) => a.$1.compareTo(b.$1));
+    var total = Duration.zero;
+    var (from, to) = sorted.first;
+    for (final (f, t) in sorted.skip(1)) {
+      if (f.isAfter(to)) {
+        total += to.difference(from);
+        (from, to) = (f, t);
+      } else if (t.isAfter(to)) {
+        to = t;
+      }
+    }
+    total += to.difference(from);
+    return total.inMinutes.toDouble();
   }
 
   /// Earliest start of any sleep segment (in-bed / awake / stage) — the

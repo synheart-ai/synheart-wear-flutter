@@ -63,6 +63,77 @@ void main() {
       expect(s.sleepEnd, _t(29, 6, 30));
     });
 
+    test('in-bed time does not add to asleep time', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 22, 30), _t(29, 6, 30)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 6)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 420);
+    });
+
+    test('in-bed time counts only when nothing says asleep', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('stages win over unstaged asleep and in-bed time', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 22, 30), _t(29, 7, 30)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 7)),
+        ...night,
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 460);
+    });
+
+    test('a session with no stages gives its length and span', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23, 30), _t(29, 6, 45)),
+      ]);
+      final s = out[DateTime(2026, 10, 29)]!;
+      expect(s.totalAsleepMinutes, 435);
+      expect(s.deepMinutes, isNull);
+      expect(s.sleepStart, _t(28, 23, 30));
+      expect(s.sleepEnd, _t(29, 6, 45));
+    });
+
+    test('a session around its stages adds nothing to them', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23), _t(29, 7)),
+        ...night,
+      ]);
+      final s = out.values.single;
+      expect(s.totalAsleepMinutes, 460);
+      expect(s.sleepStart, _t(28, 23));
+      expect(s.sleepEnd, _t(29, 7));
+    });
+
+    test('two sources recording the same night count it once', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23), _t(29, 7)),
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23, 10), _t(29, 6, 50)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('overlapping asleep records count the time they cover', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        // 23:00–03:00 and 02:00–07:00 cover 23:00–07:00.
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 3)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(29, 2), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 480);
+    });
+
+    test('a gap between asleep records is not counted', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(28, 23), _t(29, 2)),
+        _seg(HealthDataType.SLEEP_ASLEEP, _t(29, 2, 30), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 450);
+    });
+
     test('an in-bed-only source gives the in-bed span', () {
       final out = HealthAdapter.summarizeSleepNights([
         _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),
