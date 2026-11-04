@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-04
+
 ### Fixed
 - `fetchOvernightPhysiology` with `sleepNights` reads HRV and `hrStdBpm`
   from the samples taken asleep only. Both were the whole day's figures, so
