@@ -184,6 +184,43 @@ void main() {
     });
   });
 
+  group('HealthAdapter overnight HRV and HR spread', () {
+    final night = SleepNightSummary(
+      totalAsleepMinutes: 480,
+      awakeMinutes: 0,
+      sleepStart: _t(28, 23),
+      sleepEnd: _t(29, 7),
+    );
+
+    test('HRV is the median of the samples taken asleep only', () {
+      final samples = [
+        (_t(28, 18), 20.0), // evening workout
+        (_t(29, 1), 60.0),
+        (_t(29, 3), 40.0),
+        (_t(29, 5), 50.0),
+        (_t(29, 14), 25.0), // afternoon
+      ];
+      expect(HealthAdapter.asleepMedianHrv(samples, night), 50.0);
+    });
+
+    test('HRV is null without a sample asleep or without a span', () {
+      expect(
+        HealthAdapter.asleepMedianHrv([(_t(29, 14), 25.0)], night),
+        isNull,
+      );
+      expect(HealthAdapter.asleepMedianHrv([(_t(29, 1), 60.0)], null), isNull);
+    });
+
+    test('HR spread reads only the samples asleep, and needs 30', () {
+      final asleep = [
+        for (var m = 0; m < 30; m++) (_t(29, 1, m), m.isEven ? 50.0 : 54.0),
+      ];
+      final withDay = [...asleep, (_t(29, 12), 140.0)];
+      expect(HealthAdapter.asleepHrStd(withDay, night), closeTo(2.0, 1e-9));
+      expect(HealthAdapter.asleepHrStd(asleep.sublist(1), night), isNull);
+    });
+  });
+
   group('HealthAdapter.activeMinutesByDay', () {
     test('sums each record per local day', () {
       final out = HealthAdapter.activeMinutesByDay([

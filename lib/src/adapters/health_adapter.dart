@@ -123,6 +123,10 @@ class HealthAdapter {
           } else {
             healthTypes.addAll([
               HealthDataType.SLEEP_IN_BED,
+              // "Asleep (unspecified)": how HealthKit stores sleep from a
+              // source that writes no stages (most third-party apps). Left
+              // out, those nights are invisible on iOS.
+              HealthDataType.SLEEP_ASLEEP,
               HealthDataType.SLEEP_DEEP,
               HealthDataType.SLEEP_LIGHT,
               HealthDataType.SLEEP_REM,
@@ -824,6 +828,60 @@ class HealthAdapter {
     return n < _minAsleepHrSamples ? null : sum / n;
   }
 
+  /// Median of the HRV [samples] inside [night]'s asleep span; null without
+  /// the span or without a sample inside it.
+  ///
+  /// The median, not the mean: one misread RR interval can blow up a mean.
+  @visibleForTesting
+  static double? asleepMedianHrv(
+    List<(DateTime, double)> samples,
+    SleepNightSummary? night,
+  ) {
+    final inside = _insideAsleepSpan(samples, night);
+    if (inside == null || inside.isEmpty) return null;
+    final s = [...inside]..sort();
+    final mid = s.length ~/ 2;
+    return s.length.isOdd ? s[mid] : (s[mid - 1] + s[mid]) / 2.0;
+  }
+
+  /// Population standard deviation of the HR [samples] inside [night]'s
+  /// asleep span; null without the span or with fewer than
+  /// [_minHrStdSamples] samples inside it.
+  @visibleForTesting
+  static double? asleepHrStd(
+    List<(DateTime, double)> samples,
+    SleepNightSummary? night,
+  ) {
+    final inside = _insideAsleepSpan(samples, night);
+    if (inside == null || inside.length < _minHrStdSamples) return null;
+    final mean = inside.reduce((a, b) => a + b) / inside.length;
+    var sq = 0.0;
+    for (final x in inside) {
+      final d = x - mean;
+      sq += d * d;
+    }
+    final variance = sq / inside.length;
+    return variance <= 0 ? null : math.sqrt(variance);
+  }
+
+  /// The values of [samples] timed inside [night]'s asleep span, or null when
+  /// the night has no span.
+  static List<double>? _insideAsleepSpan(
+    List<(DateTime, double)> samples,
+    SleepNightSummary? night,
+  ) {
+    final from = night?.sleepStart;
+    final to = night?.sleepEnd;
+    if (from == null || to == null) return null;
+    return [
+      for (final (t, v) in samples)
+        if (!t.isBefore(from) && !t.isAfter(to)) v,
+    ];
+  }
+
+  /// Fewer HR samples than this is too thin to estimate a variance.
+  static const int _minHrStdSamples = 30;
+
   /// Sleep blocks closer than this belong to one night (a wake-up in the
   /// night); further apart, a separate sleep (a nap).
   static const Duration _nightGap = Duration(minutes: 90);
@@ -836,18 +894,18 @@ class HealthAdapter {
   /// sleep ingest. Returns one entry per local-time day-anchor where
   /// at least one of HRV (RMSSD/SDNN) or resting HR was sampled.
   ///
-  /// The platform-aware logic mirrors [readMetrics]: Apple Health
-  /// exposes RMSSD natively and we fall back to SDNN; Health Connect
-  /// only ships SDNN today and we surface the value as-if-RMSSD so
-  /// downstream consumers don't have to special-case it.
-  ///
-  /// Both numbers are aggregated as the nightly median to suppress
+  /// HRV is read as SDNN on iOS (HealthKit has no RMSSD) and as RMSSD on
+  /// Android (Health Connect). It is aggregated as a median to suppress
   /// outlier samples (a single 200ms RR misread can blow up a mean).
   ///
   /// Resting HR comes only from the platform's resting-HR record; a day
-  /// without one has none. Pass [sleepNights] (from [fetchSleepNights]) to
-  /// also get `overnightHrBpm`, the mean of the HR samples inside each
-  /// night's asleep span.
+  /// without one has none.
+  ///
+  /// Pass [sleepNights] (from [fetchSleepNights]) to get overnight values:
+  /// `overnightHrBpm` (mean HR asleep), and HRV and `hrStdBpm` from the
+  /// samples inside each night's asleep span only. A day with no night then
+  /// has no HRV or HR spread — daytime samples are not an overnight figure.
+  /// Without [sleepNights], HRV and `hrStdBpm` fall back to the whole day.
   static Future<Map<DateTime, OvernightPhysiologySummary>>
   fetchOvernightPhysiology({
     required DateTime start,
@@ -908,6 +966,7 @@ class HealthAdapter {
     }
 
     final hrSamples = <(DateTime, double)>[];
+    final hrvSamples = <(DateTime, double)>[];
     final hrvByDay = <DateTime, List<double>>{};
     final rhrByDay = <DateTime, List<double>>{};
     final hrByDay = <DateTime, List<double>>{};
@@ -928,6 +987,7 @@ class HealthAdapter {
         case HealthDataType.HEART_RATE_VARIABILITY_RMSSD:
         case HealthDataType.HEART_RATE_VARIABILITY_SDNN:
           hrvByDay.putIfAbsent(key, () => <double>[]).add(n);
+          hrvSamples.add((p.dateFrom, n));
           break;
         case HealthDataType.RESTING_HEART_RATE:
           rhrByDay.putIfAbsent(key, () => <double>[]).add(n);
@@ -975,19 +1035,31 @@ class HealthAdapter {
       ...rhrByDay.keys,
       ...hrByDay.keys,
       ...stepsByDay.keys,
+      // A night's samples can all fall before midnight, keyed to the day
+      // before; the night itself names the wake day they belong to.
+      ...?sleepNights?.keys,
     };
     final out = <DateTime, OvernightPhysiologySummary>{};
+    final overnight = sleepNights != null;
     for (final day in allDays) {
-      final hrv = medianOf(hrvByDay[day]);
+      final night = sleepNights?[day];
+      // With nights, only samples taken asleep count: these feed the
+      // engine's overnight HRV and HR-spread baselines, and a daytime
+      // median reads high HR and low HRV from waking activity.
+      final hrv = overnight
+          ? asleepMedianHrv(hrvSamples, night)
+          : medianOf(hrvByDay[day]);
       // Only a real resting-HR record. The day's HR median is not one: it
       // is dominated by waking activity (it read 108 bpm on a watch whose
       // sleeping HR is in the 50s), so it is never offered as resting HR.
       final rhr = medianOf(rhrByDay[day]);
-      final asleepHr = asleepMeanHr(hrSamples, sleepNights?[day]);
-      // Std-bpm of the day's HR trace — feeds the engine's
-      // `hrv.hr_std_bpm` baseline. Coarser sibling to RMSSD/SDNN that
-      // works from a 1Hz HR trace alone.
-      final hrStd = hrStdOf(hrByDay[day]);
+      final asleepHr = asleepMeanHr(hrSamples, night);
+      // Std-bpm of the HR trace — feeds the engine's overnight HR-spread
+      // baseline. Coarser sibling to RMSSD/SDNN that works from a 1Hz HR
+      // trace alone.
+      final hrStd = overnight
+          ? asleepHrStd(hrSamples, night)
+          : hrStdOf(hrByDay[day]);
       final steps = stepsByDay[day];
       if (hrv == null &&
           rhr == null &&

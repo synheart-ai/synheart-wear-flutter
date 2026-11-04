@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-04
+
+### Fixed
+- `fetchOvernightPhysiology` with `sleepNights` reads HRV and `hrStdBpm`
+  from the samples taken asleep only. Both were the whole day's figures, so
+  waking activity pulled HRV down and the HR spread up in values that feed
+  overnight baselines. A day without a night now has neither. Without
+  `sleepNights` the whole-day figures are unchanged.
+- iOS sleep reads include "asleep (unspecified)" (`SLEEP_ASLEEP`), how
+  HealthKit stores sleep from a source that writes no stages. Those nights
+  were invisible on iOS.
+
 ## [0.6.1] - 2026-10-30
 
 ### Fixed
