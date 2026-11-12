@@ -322,14 +322,14 @@ class HealthAdapter {
 
   /// Read health data and convert to WearMetrics in one step.
   ///
-  /// On Android the call is throttled to one read per
-  /// [_androidMinInterval] (default 10s) to stay under Health
-  /// Connect's per-app quota. Throttled calls return `null` quickly
-  /// instead of hammering HC and producing
-  /// `HealthConnectException: API call quota exceeded` errors.
-  /// Pass [bypassThrottle] to override (e.g. user-driven Pull now
-  /// after a wipe). iOS HealthKit is not throttled — Apple's API has
-  /// no per-app quota.
+  /// On Android, reads are spaced at least [_androidMinInterval] (10s)
+  /// apart to stay under Health Connect's per-app quota. A call inside
+  /// that interval gets the previous result when it asks for the same
+  /// types and window, and otherwise waits out the interval and then
+  /// reads; it never comes back empty because of the throttle. Calls run
+  /// one at a time. Pass [bypassThrottle] to skip the spacing (e.g.
+  /// user-driven Pull now after a wipe). iOS HealthKit is not throttled —
+  /// Apple's API has no per-app quota.
   static Future<WearMetrics?> readMetrics(
     Set<PermissionType> permissions, {
     DateTime? startTime,
@@ -337,14 +337,144 @@ class HealthAdapter {
     String? deviceId,
     String? source,
     bool bypassThrottle = false,
-  }) async {
-    if (_shouldThrottleAndroid(bypass: bypassThrottle)) {
-      logDebug(
-        'HealthAdapter.readMetrics throttled — last read '
-        '${DateTime.now().difference(_lastReadAt!).inMilliseconds}ms ago',
+  }) {
+    if (bypassThrottle || !Platform.isAndroid) {
+      return _readMetricsNow(
+        permissions,
+        startTime: startTime,
+        endTime: endTime,
+        deviceId: deviceId,
+        source: source,
       );
-      return null;
     }
+    final result = _readQueue.then(
+      (_) => _readMetricsSpaced(
+        permissions,
+        startTime: startTime,
+        endTime: endTime,
+        deviceId: deviceId,
+        source: source,
+      ),
+    );
+    _readQueue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// Serializes Android reads so concurrent callers can't burst past the
+  /// spacing.
+  static Future<void> _readQueue = Future.value();
+
+  /// The last successful Android `readMetrics` result and what it covered.
+  static ({
+    DateTime at,
+    Set<PermissionType> permissions,
+    DateTime start,
+    DateTime end,
+    WearMetrics result,
+  })?
+  _lastRead;
+
+  static Future<WearMetrics?> _readMetricsSpaced(
+    Set<PermissionType> permissions, {
+    DateTime? startTime,
+    DateTime? endTime,
+    String? deviceId,
+    String? source,
+  }) async {
+    final now = DateTime.now();
+    final start = startTime ?? now.subtract(const Duration(seconds: 2));
+    final end = endTime ?? now;
+    final last = _lastRead;
+    final decision = throttleDecision(
+      now: now,
+      lastReadAt: _lastReadAt,
+      previous: last == null
+          ? null
+          : (
+              at: last.at,
+              permissions: last.permissions,
+              start: last.start,
+              end: last.end,
+            ),
+      permissions: permissions,
+      start: start,
+      end: end,
+      minInterval: _androidMinInterval,
+    );
+    if (decision.reuse) {
+      logDebug(
+        'HealthAdapter.readMetrics: reusing the read from '
+        '${now.difference(last!.at).inMilliseconds}ms ago',
+      );
+      return last.result;
+    }
+    if (decision.wait > Duration.zero) {
+      logDebug(
+        'HealthAdapter.readMetrics: waiting '
+        '${decision.wait.inMilliseconds}ms for the Health Connect quota',
+      );
+      await Future<void>.delayed(decision.wait);
+    }
+    final result = await _readMetricsNow(
+      permissions,
+      startTime: startTime,
+      endTime: endTime,
+      deviceId: deviceId,
+      source: source,
+    );
+    if (result != null) {
+      _lastRead = (
+        at: DateTime.now(),
+        permissions: Set.of(permissions),
+        start: startTime ?? start,
+        end: endTime ?? end,
+        result: result,
+      );
+    }
+    return result;
+  }
+
+  /// What an Android read inside the spacing interval should do: reuse
+  /// [previous] when it asked for the same [permissions] over a window
+  /// whose ends are each within [minInterval] of this one, otherwise wait
+  /// until [minInterval] has passed since [lastReadAt].
+  @visibleForTesting
+  static ({bool reuse, Duration wait}) throttleDecision({
+    required DateTime now,
+    required DateTime? lastReadAt,
+    required ({
+      DateTime at,
+      Set<PermissionType> permissions,
+      DateTime start,
+      DateTime end,
+    })?
+    previous,
+    required Set<PermissionType> permissions,
+    required DateTime start,
+    required DateTime end,
+    Duration minInterval = _androidMinInterval,
+  }) {
+    if (lastReadAt == null) return (reuse: false, wait: Duration.zero);
+    final elapsed = now.difference(lastReadAt);
+    if (elapsed >= minInterval) return (reuse: false, wait: Duration.zero);
+    if (previous != null &&
+        now.difference(previous.at) < minInterval &&
+        previous.permissions.length == permissions.length &&
+        previous.permissions.containsAll(permissions) &&
+        previous.start.difference(start).abs() <= minInterval &&
+        previous.end.difference(end).abs() <= minInterval) {
+      return (reuse: true, wait: Duration.zero);
+    }
+    return (reuse: false, wait: minInterval - elapsed);
+  }
+
+  static Future<WearMetrics?> _readMetricsNow(
+    Set<PermissionType> permissions, {
+    DateTime? startTime,
+    DateTime? endTime,
+    String? deviceId,
+    String? source,
+  }) async {
     final healthTypes = _mapPermissions(permissions);
     if (healthTypes.isEmpty) return null;
 
@@ -414,6 +544,9 @@ class HealthAdapter {
           hrCount++;
           break;
         case HealthDataType.HEART_RATE_VARIABILITY_SDNN:
+          sdnnSum += value;
+          sdnnCount++;
+          break;
         case HealthDataType.HEART_RATE_VARIABILITY_RMSSD:
           rmssdSum += value;
           rmssdCount++;
@@ -589,9 +722,6 @@ class HealthAdapter {
   ) async {
     final results = <PermissionType, bool>{};
 
-          sdnnSum += value;
-          sdnnCount++;
-          break;
     try {
       await _ensureConfigured();
 
