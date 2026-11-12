@@ -76,11 +76,19 @@ class SynheartWear {
       final testData = <WearMetrics?>[];
       for (final adapter in _enabledAdapters()) {
         try {
-          // Try to fetch recent data (last 7 days)
+          // Try to fetch recent data. On Android this uses the same window
+          // as a default readMetrics() call (the adapter's 30 days), so the
+          // read that usually follows initialize() reuses this one instead
+          // of waiting out Health Connect's read spacing. Elsewhere, the
+          // last 7 days.
+          final android =
+              !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
           final data = await adapter.readSnapshot(
             isRealTime: false,
-            startTime: DateTime.now().subtract(const Duration(days: 7)),
-            endTime: DateTime.now(),
+            startTime: android
+                ? null
+                : DateTime.now().subtract(const Duration(days: 7)),
+            endTime: android ? null : DateTime.now(),
           );
           if (data == null) {
             logDebug(
@@ -187,8 +195,8 @@ class SynheartWear {
       // If no data is available, return empty metrics
       // This may occur if device disconnected after initialization
 
-      // Cache data if enabled
-      if (config.enableLocalCaching) {
+      // Cache data if enabled. An empty read has nothing worth keeping.
+      if (config.enableLocalCaching && mergedData.metrics.isNotEmpty) {
         await LocalCache.storeSession(
           mergedData,
           enableEncryption: config.enableEncryption,
@@ -244,6 +252,7 @@ class SynheartWear {
       startDate: startDate,
       endDate: endDate,
       limit: limit,
+      enableEncryption: config.enableEncryption,
     );
   }
 

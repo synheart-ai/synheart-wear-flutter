@@ -4,6 +4,81 @@ import 'package:synheart_wear/src/adapters/wear_adapter.dart';
 import 'package:synheart_wear/synheart_wear.dart';
 
 void main() {
+  group('HealthAdapter.throttleDecision', () {
+    final t0 = DateTime(2026, 11, 12, 12);
+    const perms = {PermissionType.heartRate, PermissionType.steps};
+    final start = t0.subtract(const Duration(days: 30));
+    final previous = (at: t0, permissions: perms, start: start, end: t0);
+
+    test('reads at once when nothing was read before', () {
+      final d = HealthAdapter.throttleDecision(
+        now: t0,
+        lastReadAt: null,
+        previous: null,
+        permissions: perms,
+        start: start,
+        end: t0,
+      );
+      expect(d.reuse, isFalse);
+      expect(d.wait, Duration.zero);
+    });
+
+    test('reuses a recent read of the same types and window', () {
+      final now = t0.add(const Duration(seconds: 3));
+      final d = HealthAdapter.throttleDecision(
+        now: now,
+        lastReadAt: t0,
+        previous: previous,
+        permissions: {PermissionType.steps, PermissionType.heartRate},
+        start: now.subtract(const Duration(days: 30)),
+        end: now,
+      );
+      expect(d.reuse, isTrue);
+    });
+
+    test('waits out the interval for a different window', () {
+      final now = t0.add(const Duration(seconds: 3));
+      final d = HealthAdapter.throttleDecision(
+        now: now,
+        lastReadAt: t0,
+        previous: previous,
+        permissions: perms,
+        start: now.subtract(const Duration(days: 1)),
+        end: now,
+      );
+      expect(d.reuse, isFalse);
+      expect(d.wait, const Duration(seconds: 7));
+    });
+
+    test('waits out the interval for different types', () {
+      final now = t0.add(const Duration(seconds: 4));
+      final d = HealthAdapter.throttleDecision(
+        now: now,
+        lastReadAt: t0,
+        previous: previous,
+        permissions: {PermissionType.heartRate},
+        start: start,
+        end: now,
+      );
+      expect(d.reuse, isFalse);
+      expect(d.wait, const Duration(seconds: 6));
+    });
+
+    test('reads at once after the interval has passed', () {
+      final now = t0.add(const Duration(seconds: 10));
+      final d = HealthAdapter.throttleDecision(
+        now: now,
+        lastReadAt: t0,
+        previous: previous,
+        permissions: perms,
+        start: start,
+        end: now,
+      );
+      expect(d.reuse, isFalse);
+      expect(d.wait, Duration.zero);
+    });
+  });
+
   group('WearAdapter Interface Tests', () {
     test('AppleHealthKitAdapter implements WearAdapter correctly', () {
       final adapter = AppleHealthKitAdapter();
@@ -16,6 +91,24 @@ void main() {
       );
       expect(adapter.supportedPermissions, contains(PermissionType.steps));
       expect(adapter.supportedPermissions, contains(PermissionType.calories));
+    });
+
+    test('history access has no limit to lift off Android', () async {
+      // Tests run on the host, not Android: no platform call is made.
+      expect(await HealthAdapter.isHistoryAvailable(), isFalse);
+      expect(await HealthAdapter.isHistoryAuthorized(), isTrue);
+      expect(await HealthAdapter.requestHistoryAuthorization(), isTrue);
+    });
+
+    test('labels data by the store it came from', () {
+      expect(
+        AppleHealthKitAdapter.sourceFor(isAndroid: true),
+        'health_connect',
+      );
+      expect(
+        AppleHealthKitAdapter.sourceFor(isAndroid: false),
+        'apple_healthkit',
+      );
     });
   });
 

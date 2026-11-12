@@ -67,7 +67,7 @@ apply plugin: 'kotlin-android'
 
 android {
     namespace 'ai.synheart.wear'
-    compileSdk 34
+    compileSdk 36
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

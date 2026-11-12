@@ -706,11 +706,10 @@ class GarminProvider {
         metrics['hr'] = _toNum(item['restingHeartRate']);
       }
 
-      // HRV
+      // HRV. Garmin's unlabelled `hrv` is RMSSD-based (its HRV Status
+      // nightly average); it is never copied into `hrv_sdnn`.
       if (item.containsKey('hrv')) {
-        final hrv = _toNum(item['hrv']);
-        metrics['hrv_rmssd'] = hrv;
-        metrics['hrv_sdnn'] = hrv;
+        metrics['hrv_rmssd'] = _toNum(item['hrv']);
       } else if (item.containsKey('hrvRmssd')) {
         metrics['hrv_rmssd'] = _toNum(item['hrvRmssd']);
       } else if (item.containsKey('hrvSdnn')) {

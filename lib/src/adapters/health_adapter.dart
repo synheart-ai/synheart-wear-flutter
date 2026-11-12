@@ -265,16 +265,71 @@ class HealthAdapter {
     }
   }
 
+  /// Whether this device's Health Connect offers the history permission
+  /// (`READ_HEALTH_DATA_HISTORY`). Without that permission an app reads only
+  /// the 30 days before it was first granted access, for every record type,
+  /// sleep included.
+  ///
+  /// False on iOS, where HealthKit has no such window, and on Health Connect
+  /// versions that predate the permission.
+  static Future<bool> isHistoryAvailable() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      await _ensureConfigured();
+      return await _health.isHealthDataHistoryAvailable();
+    } catch (e) {
+      logDebug('Health history availability check failed: $e');
+      return false;
+    }
+  }
+
+  /// Whether the app may read Health Connect data older than 30 days.
+  /// Always true on iOS, which has no such limit.
+  static Future<bool> isHistoryAuthorized() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      await _ensureConfigured();
+      return await _health.isHealthDataHistoryAuthorized();
+    } catch (e) {
+      logDebug('Health history authorization check failed: $e');
+      return false;
+    }
+  }
+
+  /// Ask for Health Connect history access (`READ_HEALTH_DATA_HISTORY`), so
+  /// reads such as [fetchSleepNights] can reach further back than 30 days.
+  ///
+  /// This is its own system prompt, separate from [requestPermissions], and
+  /// the host app must declare the permission in its manifest (this plugin's
+  /// manifest declares no health permissions). Returns true when granted or
+  /// already granted, and always true on iOS. Returns false when this
+  /// device's Health Connect doesn't offer the permission.
+  static Future<bool> requestHistoryAuthorization() async {
+    if (!Platform.isAndroid) return true;
+    // Never stack this prompt on a permission dialog that is still open.
+    final inFlight = _permissionCompleter;
+    if (inFlight != null) await inFlight.future;
+    try {
+      await _ensureConfigured();
+      if (!await _health.isHealthDataHistoryAvailable()) return false;
+      if (await _health.isHealthDataHistoryAuthorized()) return true;
+      return await _health.requestHealthDataHistoryAuthorization();
+    } catch (e) {
+      logError('Health history authorization request error', e);
+      return false;
+    }
+  }
+
   /// Read health data and convert to WearMetrics in one step.
   ///
-  /// On Android the call is throttled to one read per
-  /// [_androidMinInterval] (default 10s) to stay under Health
-  /// Connect's per-app quota. Throttled calls return `null` quickly
-  /// instead of hammering HC and producing
-  /// `HealthConnectException: API call quota exceeded` errors.
-  /// Pass [bypassThrottle] to override (e.g. user-driven Pull now
-  /// after a wipe). iOS HealthKit is not throttled — Apple's API has
-  /// no per-app quota.
+  /// On Android, reads are spaced at least [_androidMinInterval] (10s)
+  /// apart to stay under Health Connect's per-app quota. A call inside
+  /// that interval gets the previous result when it asks for the same
+  /// types and window, and otherwise waits out the interval and then
+  /// reads; it never comes back empty because of the throttle. Calls run
+  /// one at a time. Pass [bypassThrottle] to skip the spacing (e.g.
+  /// user-driven Pull now after a wipe). iOS HealthKit is not throttled —
+  /// Apple's API has no per-app quota.
   static Future<WearMetrics?> readMetrics(
     Set<PermissionType> permissions, {
     DateTime? startTime,
@@ -282,14 +337,144 @@ class HealthAdapter {
     String? deviceId,
     String? source,
     bool bypassThrottle = false,
-  }) async {
-    if (_shouldThrottleAndroid(bypass: bypassThrottle)) {
-      logDebug(
-        'HealthAdapter.readMetrics throttled — last read '
-        '${DateTime.now().difference(_lastReadAt!).inMilliseconds}ms ago',
+  }) {
+    if (bypassThrottle || !Platform.isAndroid) {
+      return _readMetricsNow(
+        permissions,
+        startTime: startTime,
+        endTime: endTime,
+        deviceId: deviceId,
+        source: source,
       );
-      return null;
     }
+    final result = _readQueue.then(
+      (_) => _readMetricsSpaced(
+        permissions,
+        startTime: startTime,
+        endTime: endTime,
+        deviceId: deviceId,
+        source: source,
+      ),
+    );
+    _readQueue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  /// Serializes Android reads so concurrent callers can't burst past the
+  /// spacing.
+  static Future<void> _readQueue = Future.value();
+
+  /// The last successful Android `readMetrics` result and what it covered.
+  static ({
+    DateTime at,
+    Set<PermissionType> permissions,
+    DateTime start,
+    DateTime end,
+    WearMetrics result,
+  })?
+  _lastRead;
+
+  static Future<WearMetrics?> _readMetricsSpaced(
+    Set<PermissionType> permissions, {
+    DateTime? startTime,
+    DateTime? endTime,
+    String? deviceId,
+    String? source,
+  }) async {
+    final now = DateTime.now();
+    final start = startTime ?? now.subtract(const Duration(seconds: 2));
+    final end = endTime ?? now;
+    final last = _lastRead;
+    final decision = throttleDecision(
+      now: now,
+      lastReadAt: _lastReadAt,
+      previous: last == null
+          ? null
+          : (
+              at: last.at,
+              permissions: last.permissions,
+              start: last.start,
+              end: last.end,
+            ),
+      permissions: permissions,
+      start: start,
+      end: end,
+      minInterval: _androidMinInterval,
+    );
+    if (decision.reuse) {
+      logDebug(
+        'HealthAdapter.readMetrics: reusing the read from '
+        '${now.difference(last!.at).inMilliseconds}ms ago',
+      );
+      return last.result;
+    }
+    if (decision.wait > Duration.zero) {
+      logDebug(
+        'HealthAdapter.readMetrics: waiting '
+        '${decision.wait.inMilliseconds}ms for the Health Connect quota',
+      );
+      await Future<void>.delayed(decision.wait);
+    }
+    final result = await _readMetricsNow(
+      permissions,
+      startTime: startTime,
+      endTime: endTime,
+      deviceId: deviceId,
+      source: source,
+    );
+    if (result != null) {
+      _lastRead = (
+        at: DateTime.now(),
+        permissions: Set.of(permissions),
+        start: startTime ?? start,
+        end: endTime ?? end,
+        result: result,
+      );
+    }
+    return result;
+  }
+
+  /// What an Android read inside the spacing interval should do: reuse
+  /// [previous] when it asked for the same [permissions] over a window
+  /// whose ends are each within [minInterval] of this one, otherwise wait
+  /// until [minInterval] has passed since [lastReadAt].
+  @visibleForTesting
+  static ({bool reuse, Duration wait}) throttleDecision({
+    required DateTime now,
+    required DateTime? lastReadAt,
+    required ({
+      DateTime at,
+      Set<PermissionType> permissions,
+      DateTime start,
+      DateTime end,
+    })?
+    previous,
+    required Set<PermissionType> permissions,
+    required DateTime start,
+    required DateTime end,
+    Duration minInterval = _androidMinInterval,
+  }) {
+    if (lastReadAt == null) return (reuse: false, wait: Duration.zero);
+    final elapsed = now.difference(lastReadAt);
+    if (elapsed >= minInterval) return (reuse: false, wait: Duration.zero);
+    if (previous != null &&
+        now.difference(previous.at) < minInterval &&
+        previous.permissions.length == permissions.length &&
+        previous.permissions.containsAll(permissions) &&
+        previous.start.difference(start).abs() <= minInterval &&
+        previous.end.difference(end).abs() <= minInterval) {
+      return (reuse: true, wait: Duration.zero);
+    }
+    return (reuse: false, wait: minInterval - elapsed);
+  }
+
+  static Future<WearMetrics?> _readMetricsNow(
+    Set<PermissionType> permissions, {
+    DateTime? startTime,
+    DateTime? endTime,
+    String? deviceId,
+    String? source,
+  }) async {
     final healthTypes = _mapPermissions(permissions);
     if (healthTypes.isEmpty) return null;
 
@@ -333,9 +518,12 @@ class HealthAdapter {
     // Accumulators for averaging HR and HRV
     double hrSum = 0.0;
     int hrCount = 0;
-    double hrvSum = 0.0;
-    int hrvCount = 0;
-    HealthDataType? hrvType; // Track which HRV type we're averaging
+    // RMSSD and SDNN are different measures and are averaged separately:
+    // HealthKit reports SDNN, Health Connect reports RMSSD.
+    double rmssdSum = 0.0;
+    int rmssdCount = 0;
+    double sdnnSum = 0.0;
+    int sdnnCount = 0;
     DateTime? latestTimestamp;
 
     // Process all data points to sum/add values
@@ -356,17 +544,12 @@ class HealthAdapter {
           hrCount++;
           break;
         case HealthDataType.HEART_RATE_VARIABILITY_SDNN:
+          sdnnSum += value;
+          sdnnCount++;
+          break;
         case HealthDataType.HEART_RATE_VARIABILITY_RMSSD:
-          // Sum all HRV values for averaging
-          hrvSum += value;
-          hrvCount++;
-          // Track the HRV type (use the first one encountered, or prefer RMSSD)
-          if (hrvType == null) {
-            hrvType = point.type;
-          } else if (point.type ==
-              HealthDataType.HEART_RATE_VARIABILITY_RMSSD) {
-            hrvType = point.type; // Prefer RMSSD if available
-          }
+          rmssdSum += value;
+          rmssdCount++;
           break;
         case HealthDataType.STEPS:
           // Sum all steps
@@ -488,20 +671,16 @@ class HealthAdapter {
       metricTimestamps['hr'] = latestTimestamp ?? DateTime.now();
     }
 
-    // Set the averaged HRV
-    if (hrvCount > 0 && hrvType != null) {
-      final avgHRV = hrvSum / hrvCount;
-      if (hrvType == HealthDataType.HEART_RATE_VARIABILITY_RMSSD) {
-        metrics['hrv_rmssd'] = avgHRV;
-        metrics['hrv_sdnn'] = avgHRV; // Also store as SDNN for compatibility
-        metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
-        metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
-      } else {
-        metrics['hrv_sdnn'] = avgHRV;
-        metrics['hrv_rmssd'] = avgHRV; // Also store as RMSSD for compatibility
-        metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
-        metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
-      }
+    // Set the averaged HRV, each measure under its own key only. A missing
+    // key means the store didn't report that measure; it is never filled
+    // from the other one.
+    if (rmssdCount > 0) {
+      metrics['hrv_rmssd'] = rmssdSum / rmssdCount;
+      metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
+    }
+    if (sdnnCount > 0) {
+      metrics['hrv_sdnn'] = sdnnSum / sdnnCount;
+      metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
     }
 
     // Get the most recent data point overall for main timestamp
@@ -513,7 +692,9 @@ class HealthAdapter {
     meta['summed'] = true; // Steps, calories, distance, sleep are summed
     meta['averaged'] = true; // HR and HRV are averaged
     if (hrCount > 0) meta['hr_data_points'] = hrCount;
-    if (hrvCount > 0) meta['hrv_data_points'] = hrvCount;
+    if (rmssdCount + sdnnCount > 0) {
+      meta['hrv_data_points'] = rmssdCount + sdnnCount;
+    }
     meta['synced'] = true;
     // Store individual metric timestamps in metadata
     meta['metric_timestamps'] = metricTimestamps.map(

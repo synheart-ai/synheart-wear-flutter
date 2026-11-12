@@ -39,7 +39,7 @@ the `synheart_wear_flutter` target.
 
 ```yaml
 dependencies:
-  synheart_wear: ^0.6.2
+  synheart_wear: ^0.7.0
 ```
 
 ```bash
@@ -129,8 +129,12 @@ final hrSubscription = synheart.streamHR(interval: Duration(seconds: 5))
 // Stream HRV in 5-second windows
 final hrvSubscription = synheart.streamHRV(windowSize: Duration(seconds: 5))
   .listen((metrics) {
-    final hrv = metrics.getMetric(MetricType.hrvRmssd);
-    if (hrv != null) print('HRV RMSSD: $hrv ms');
+    // Health Connect reports RMSSD, Apple Health reports SDNN. They are
+    // different statistics, so read the one your platform provides.
+    final rmssd = metrics.getMetric(MetricType.hrvRmssd);
+    final sdnn = metrics.getMetric(MetricType.hrvSdnn);
+    if (rmssd != null) print('HRV RMSSD: $rmssd ms');
+    if (sdnn != null) print('HRV SDNN: $sdnn ms');
   }, onError: (error) {
     print('HRV stream error: $error');
   });
@@ -218,6 +222,8 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 <uses-permission android:name="android.permission.health.READ_DISTANCE"/>
 <!-- Sleep sessions and stages (fetchSleepNights) -->
 <uses-permission android:name="android.permission.health.READ_SLEEP"/>
+<!-- Optional: data older than 30 days (see "Reading past 30 days" below) -->
+<uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY"/>
 
 <!-- Health Connect Package Query -->
 <queries>
@@ -250,6 +256,29 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 
 **Note:** `MainActivity` must extend `FlutterFragmentActivity` (not `FlutterActivity`) for Android 14+.
 
+#### Reading past 30 days
+
+Without `READ_HEALTH_DATA_HISTORY`, Health Connect lets an app read only the
+30 days before it was first granted access, for every record type. Ask for
+history access separately; it is its own prompt:
+
+```dart
+if (await HealthAdapter.isHistoryAvailable()) {
+  await HealthAdapter.requestHistoryAuthorization();
+}
+```
+
+`isHistoryAvailable()` is `false` where the device's Health Connect doesn't
+offer the permission. On iOS there is no such limit: the checks report
+authorized and make no platform call.
+
+#### Read spacing
+
+Health Connect limits how often an app may read. On Android the SDK spaces
+`readMetrics()` calls at least 10 seconds apart: a call for the same data
+inside that gap returns the previous result, and any other call waits out the
+gap and then reads.
+
 ### iOS
 
 Add to `ios/Runner/Info.plist`:
@@ -266,15 +295,17 @@ needed.
 
 | Platform    | Limitation                      | SDK Behavior                         |
 | ----------- | ------------------------------- | ------------------------------------ |
-| **Android** | HRV: Only `HRV_RMSSD` supported | Automatically maps to supported type |
+| **Android** | HRV: Only `HRV_RMSSD` supported | Reported as `hrv_rmssd`              |
 | **Android** | Distance: Uses `DISTANCE_DELTA` | Automatically uses correct type      |
-| **iOS**     | Full support for all metrics    | No limitations                       |
+| **Android** | 30 days of past data by default | See "Reading past 30 days"           |
+| **iOS**     | HRV: Only `HRV_SDNN` supported  | Reported as `hrv_sdnn`               |
 
 ## 🔒 Privacy & Security
 
 - ✅ Consent-first design
-- ✅ AES-256-CBC encryption
-- ✅ Automatic key management
+- ✅ AES-256-GCM encrypted local cache, a fresh nonce per record
+- ✅ Key kept in the iOS Keychain / Android secure storage, never on disk next to the data
+- ✅ Tampered records are dropped; nothing is cached if the key is unavailable
 - ✅ Anonymized UUIDs
 - ✅ Right to forget (revoke & delete)
 
@@ -389,7 +420,7 @@ The `initialize()` method:
 Set<PermissionType> permissions;
 if (Platform.isAndroid) {
   // Android Health Connect limitations:
-  // - HRV: Only RMSSD supported (SDNN not available)
+  // - HRV: Only RMSSD (reported as hrv_rmssd)
   // - Distance: Not directly supported (would need DISTANCE_DELTA)
   permissions = {
     PermissionType.heartRate,
@@ -399,10 +430,10 @@ if (Platform.isAndroid) {
     // Note: Distance is not included as Health Connect doesn't support it
   };
 } else {
-  // iOS HealthKit supports all metrics
+  // iOS HealthKit
   permissions = {
     PermissionType.heartRate,
-    PermissionType.heartRateVariability, // Supports both RMSSD and SDNN
+    PermissionType.heartRateVariability, // SDNN (reported as hrv_sdnn)
     PermissionType.steps,
     PermissionType.calories,
     PermissionType.distance,
