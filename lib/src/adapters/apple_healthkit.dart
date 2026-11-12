@@ -31,6 +31,15 @@ class AppleHealthKitAdapter implements WearAdapter {
   @override
   String get id => 'apple_healthkit';
 
+  /// The store the data actually came from, written to `WearMetrics.source`.
+  /// The adapter [id] stays `apple_healthkit` on both platforms, but data read
+  /// on Android comes from Health Connect and must say so.
+  @visibleForTesting
+  static String sourceFor({required bool isAndroid}) =>
+      isAndroid ? 'health_connect' : 'apple_healthkit';
+
+  String get dataSource => sourceFor(isAndroid: Platform.isAndroid);
+
   @override
   Set<PermissionType> get supportedPermissions => const {
     PermissionType.heartRate,
@@ -112,8 +121,10 @@ class AppleHealthKitAdapter implements WearAdapter {
         _platformSupportedPermissions,
         startTime: effectiveStartTime,
         endTime: effectiveEndTime,
-        deviceId: 'applewatch_${DateTime.now().millisecondsSinceEpoch}',
-        source: id,
+        deviceId: Platform.isAndroid
+            ? 'health_connect_${DateTime.now().millisecondsSinceEpoch}'
+            : 'applewatch_${DateTime.now().millisecondsSinceEpoch}',
+        source: dataSource,
       );
 
       if (metrics != null) {

@@ -333,9 +333,12 @@ class HealthAdapter {
     // Accumulators for averaging HR and HRV
     double hrSum = 0.0;
     int hrCount = 0;
-    double hrvSum = 0.0;
-    int hrvCount = 0;
-    HealthDataType? hrvType; // Track which HRV type we're averaging
+    // RMSSD and SDNN are different measures and are averaged separately:
+    // HealthKit reports SDNN, Health Connect reports RMSSD.
+    double rmssdSum = 0.0;
+    int rmssdCount = 0;
+    double sdnnSum = 0.0;
+    int sdnnCount = 0;
     DateTime? latestTimestamp;
 
     // Process all data points to sum/add values
@@ -357,16 +360,8 @@ class HealthAdapter {
           break;
         case HealthDataType.HEART_RATE_VARIABILITY_SDNN:
         case HealthDataType.HEART_RATE_VARIABILITY_RMSSD:
-          // Sum all HRV values for averaging
-          hrvSum += value;
-          hrvCount++;
-          // Track the HRV type (use the first one encountered, or prefer RMSSD)
-          if (hrvType == null) {
-            hrvType = point.type;
-          } else if (point.type ==
-              HealthDataType.HEART_RATE_VARIABILITY_RMSSD) {
-            hrvType = point.type; // Prefer RMSSD if available
-          }
+          rmssdSum += value;
+          rmssdCount++;
           break;
         case HealthDataType.STEPS:
           // Sum all steps
@@ -488,20 +483,16 @@ class HealthAdapter {
       metricTimestamps['hr'] = latestTimestamp ?? DateTime.now();
     }
 
-    // Set the averaged HRV
-    if (hrvCount > 0 && hrvType != null) {
-      final avgHRV = hrvSum / hrvCount;
-      if (hrvType == HealthDataType.HEART_RATE_VARIABILITY_RMSSD) {
-        metrics['hrv_rmssd'] = avgHRV;
-        metrics['hrv_sdnn'] = avgHRV; // Also store as SDNN for compatibility
-        metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
-        metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
-      } else {
-        metrics['hrv_sdnn'] = avgHRV;
-        metrics['hrv_rmssd'] = avgHRV; // Also store as RMSSD for compatibility
-        metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
-        metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
-      }
+    // Set the averaged HRV, each measure under its own key only. A missing
+    // key means the store didn't report that measure; it is never filled
+    // from the other one.
+    if (rmssdCount > 0) {
+      metrics['hrv_rmssd'] = rmssdSum / rmssdCount;
+      metricTimestamps['hrv_rmssd'] = latestTimestamp ?? DateTime.now();
+    }
+    if (sdnnCount > 0) {
+      metrics['hrv_sdnn'] = sdnnSum / sdnnCount;
+      metricTimestamps['hrv_sdnn'] = latestTimestamp ?? DateTime.now();
     }
 
     // Get the most recent data point overall for main timestamp
@@ -513,7 +504,9 @@ class HealthAdapter {
     meta['summed'] = true; // Steps, calories, distance, sleep are summed
     meta['averaged'] = true; // HR and HRV are averaged
     if (hrCount > 0) meta['hr_data_points'] = hrCount;
-    if (hrvCount > 0) meta['hrv_data_points'] = hrvCount;
+    if (rmssdCount + sdnnCount > 0) {
+      meta['hrv_data_points'] = rmssdCount + sdnnCount;
+    }
     meta['synced'] = true;
     // Store individual metric timestamps in metadata
     meta['metric_timestamps'] = metricTimestamps.map(
@@ -541,6 +534,9 @@ class HealthAdapter {
   ) async {
     final results = <PermissionType, bool>{};
 
+          sdnnSum += value;
+          sdnnCount++;
+          break;
     try {
       await _ensureConfigured();
 

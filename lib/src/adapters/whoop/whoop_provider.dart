@@ -992,13 +992,11 @@ class WhoopProvider {
       final hrvSdnn =
           readNested<dynamic>('hrv_sdnn') ?? readNested<dynamic>('hrvSdnn');
       final hrvAlt = readNested<dynamic>('hrv');
+      // WHOOP's HRV is RMSSD; it is never copied into `hrv_sdnn`.
       if (hrvRmssd != null) {
         metrics['hrv_rmssd'] = _toNum(hrvRmssd);
-        if (hrvSdnn == null) metrics['hrv_sdnn'] = _toNum(hrvRmssd);
       } else if (hrvAlt != null) {
-        final v = _toNum(hrvAlt);
-        metrics['hrv_rmssd'] = v;
-        metrics['hrv_sdnn'] = v;
+        metrics['hrv_rmssd'] = _toNum(hrvAlt);
       }
       if (hrvSdnn != null) {
         metrics['hrv_sdnn'] = _toNum(hrvSdnn);
@@ -1122,8 +1120,10 @@ class WhoopProvider {
     final uri = Uri.parse(
       '$_apiBase/whoop/oauth/disconnect',
     ).replace(queryParameters: {'user_id': userId, 'app_id': appId});
-    final res =
-        await http.delete(uri, headers: await _requestHeaders('DELETE', uri));
+    final res = await http.delete(
+      uri,
+      headers: await _requestHeaders('DELETE', uri),
+    );
     if (res.statusCode != 200) throw Exception(res.body);
   }
 }
