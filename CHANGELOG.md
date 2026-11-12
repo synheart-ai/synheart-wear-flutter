@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Android `compileSdk` raised to 36, so apps no longer need to force it.
+
+### Added
+- **Health Connect history access.** `HealthAdapter.isHistoryAvailable()`,
+  `isHistoryAuthorized()` and `requestHistoryAuthorization()`. Without the
+  `READ_HEALTH_DATA_HISTORY` permission, Health Connect lets an app read only
+  the 30 days before it was first granted access, for every record type, so a
+  long backfill quietly returned about 30 days. The request is its own prompt,
+  and the host app declares the permission in its manifest. On iOS there is no
+  such limit: the checks report authorized and make no platform call.
+
+### Security
+- **Cache encryption replaced.** The previous scheme reused one IV for every
+  record written in a process, in AES's CTR mode (labelled `AES-256-CBC`),
+  which lets two records be combined to cancel the encryption; the key sat
+  in a plain file next to the data; and records had no integrity check.
+  Records are now sealed with AES-256-GCM and a fresh 96-bit nonce each, under
+  a key kept in the iOS Keychain (after first unlock, this device only) or
+  Android secure storage via `flutter_secure_storage`. Tampered records are
+  dropped. If the key can't be obtained, the session is not cached rather
+  than stored unencrypted. Records, the key file and plaintext leftovers from
+  earlier versions are deleted on first use.
+- **File names no longer include the device id**, and the plaintext
+  `meta.log` is no longer written when encryption is on.
+
+### Fixed
+- **`readMetrics()` no longer comes back empty on Android right after
+  `initialize()` or another read.** Health Connect reads are spaced 10 s
+  apart, and a call inside that gap returned no data. A call for the same
+  types and window now gets the previous result, and any other call waits
+  out the gap and then reads. Reads run one at a time. On Android,
+  `initialize()` now checks the same 30-day window a default `readMetrics()`
+  reads, so the first read after it is immediate. Empty reads are no longer
+  written to the cache.
+- **`getCachedSessions` respects the date range before the limit.** It
+  stopped at `limit` records in directory order and then sorted, so it could
+  miss the newest sessions. It now filters, sorts newest first, then limits.
+- **Two sessions with the same timestamp no longer overwrite each other.**
+- **Health Connect data is labelled `health_connect`.** On Android the
+  platform adapter reported `source: 'apple_healthkit'` and an `applewatch_`
+  device id. The adapter id is unchanged.
+- **HRV measures are no longer mixed.** One HRV value was written to both
+  `hrv_rmssd` and `hrv_sdnn`, and when a window held both types they were
+  averaged together. RMSSD and SDNN are now averaged separately and each
+  appears only when the source reported it: HealthKit gives `hrv_sdnn`,
+  Health Connect, WHOOP and Garmin give `hrv_rmssd`. Code that read the
+  other key now gets `null` instead of a copied value.
+
 ## [0.6.2] - 2026-11-04
 
 ### Fixed
