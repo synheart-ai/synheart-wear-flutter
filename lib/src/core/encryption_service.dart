@@ -1,114 +1,170 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
 import 'package:encrypt/encrypt.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:meta/meta.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 
-/// AES-256 encryption service for local data storage
+/// Where the cache key is kept.
+abstract class CacheKeyStore {
+  Future<String?> read();
+  Future<void> write(String value);
+  Future<void> delete();
+}
+
+/// Keeps the cache key in the iOS Keychain (after first unlock, this device
+/// only, never synced) or the Android Keystore-backed secure storage.
+class SecureCacheKeyStore implements CacheKeyStore {
+  static const _name = 'synheart_wear_cache_key_v2';
+
+  static const _storage = FlutterSecureStorage(
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
+    mOptions: MacOsOptions(
+      accessibility: KeychainAccessibility.first_unlock_this_device,
+    ),
+  );
+
+  const SecureCacheKeyStore();
+
+  @override
+  Future<String?> read() => _storage.read(key: _name);
+
+  @override
+  Future<void> write(String value) => _storage.write(key: _name, value: value);
+
+  @override
+  Future<void> delete() => _storage.delete(key: _name);
+}
+
+/// AES-256-GCM encryption for cached sessions.
+///
+/// Each record gets a fresh random 96-bit nonce, so no nonce is reused under
+/// the key, and the GCM tag makes a tampered record fail to decrypt instead
+/// of returning garbage.
 class EncryptionService {
-  static const String _keyFileName = 'synheart_encryption.key';
-  static const int _keyLength = 32; // 256 bits
+  static const String algorithm = 'AES-256-GCM';
+  static const int _formatVersion = 2;
+  static const int _keyLength = 32;
+  static const int _nonceLength = 12;
 
+  /// Key file written by earlier versions, deleted on first use.
+  static const String _legacyKeyFileName = 'synheart_encryption.key';
+
+  static CacheKeyStore _keyStore = const SecureCacheKeyStore();
   static Encrypter? _encrypter;
-  static IV? _iv;
+  static bool _legacyKeyRemoved = false;
 
-  /// Initialize encryption service with key management
-  static Future<void> initialize() async {
+  /// Replaces the key store. For tests only.
+  @visibleForTesting
+  static set keyStoreForTesting(CacheKeyStore store) {
+    _keyStore = store;
+    _encrypter = null;
+    _legacyKeyRemoved = true;
+  }
+
+  static Future<Encrypter> _getEncrypter() async {
+    final existing = _encrypter;
+    if (existing != null) return existing;
+
+    await _removeLegacyKeyFile();
     final key = await _getOrCreateKey();
-    _encrypter = Encrypter(AES(key));
-    _iv = IV.fromSecureRandom(16); // 128-bit IV
+    return _encrypter = Encrypter(AES(key, mode: AESMode.gcm));
   }
 
-  /// Get or create encryption key
   static Future<Key> _getOrCreateKey() async {
-    final keyFile = await _getKeyFile();
-
-    if (await keyFile.exists()) {
-      final keyBytes = await keyFile.readAsBytes();
-      return Key(keyBytes);
-    } else {
-      // Generate new key
-      final keyBytes = _generateSecureKey();
-      await keyFile.writeAsBytes(keyBytes);
-      return Key(keyBytes);
+    final stored = await _keyStore.read();
+    if (stored != null) {
+      final bytes = base64Decode(stored);
+      if (bytes.length == _keyLength) return Key(bytes);
     }
+    final bytes = _randomBytes(_keyLength);
+    await _keyStore.write(base64Encode(bytes));
+    return Key(bytes);
   }
 
-  /// Generate cryptographically secure key
-  static Uint8List _generateSecureKey() {
+  static Uint8List _randomBytes(int length) {
     final random = Random.secure();
     return Uint8List.fromList(
-      List.generate(_keyLength, (_) => random.nextInt(256)),
+      List.generate(length, (_) => random.nextInt(256)),
     );
   }
 
-  /// Get key file path
-  static Future<File> _getKeyFile() async {
-    final appDir = await getApplicationDocumentsDirectory();
-    return File('${appDir.path}/$_keyFileName');
+  /// The old key sat in plain view next to the data it protected.
+  static Future<void> _removeLegacyKeyFile() async {
+    if (_legacyKeyRemoved) return;
+    _legacyKeyRemoved = true;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$_legacyKeyFileName');
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Best effort; a missing documents directory is not fatal.
+    }
   }
 
-  /// Encrypt data using AES-256
+  /// Encrypts [data] into a self-describing record.
   static Future<Map<String, Object?>> encryptData(
     Map<String, Object?> data,
   ) async {
-    if (_encrypter == null || _iv == null) {
-      await initialize();
-    }
-
-    final jsonString = jsonEncode(data);
-    final encrypted = _encrypter!.encrypt(jsonString, iv: _iv!);
-
+    final encrypter = await _getEncrypter();
+    final nonce = IV(_randomBytes(_nonceLength));
+    final sealed = encrypter.encryptBytes(
+      utf8.encode(jsonEncode(data)),
+      iv: nonce,
+    );
     return {
-      'encrypted_data': encrypted.base64,
-      'iv': _iv!.base64,
-      'algorithm': 'AES-256-CBC',
-      'timestamp': DateTime.now().toIso8601String(),
+      'v': _formatVersion,
+      'algorithm': algorithm,
+      'nonce': nonce.base64,
+      'ciphertext': sealed.base64,
     };
   }
 
-  /// Decrypt data using AES-256
+  /// Decrypts a record produced by [encryptData]. Throws if the record is
+  /// not in the current format, was tampered with, or was sealed under a
+  /// different key.
   static Future<Map<String, Object?>> decryptData(
-    Map<String, Object?> encryptedData,
+    Map<String, Object?> record,
   ) async {
-    if (_encrypter == null) {
-      await initialize();
+    if (!isEncrypted(record)) {
+      throw const FormatException('Not a current encrypted cache record');
     }
-
-    final encryptedString = encryptedData['encrypted_data'] as String;
-    final ivString = encryptedData['iv'] as String;
-
-    final encrypted = Encrypted.fromBase64(encryptedString);
-    final iv = IV.fromBase64(ivString);
-
-    final decryptedString = _encrypter!.decrypt(encrypted, iv: iv);
-    return jsonDecode(decryptedString) as Map<String, Object?>;
+    final encrypter = await _getEncrypter();
+    final plain = encrypter.decryptBytes(
+      Encrypted.fromBase64(record['ciphertext'] as String),
+      iv: IV.fromBase64(record['nonce'] as String),
+    );
+    return jsonDecode(utf8.decode(plain)) as Map<String, Object?>;
   }
 
-  /// Check if data is encrypted
+  /// Whether [data] is a record in the current encrypted format.
   static bool isEncrypted(Map<String, Object?> data) {
-    return data.containsKey('encrypted_data') &&
-        data.containsKey('iv') &&
-        data.containsKey('algorithm');
+    return data['v'] == _formatVersion &&
+        data['algorithm'] == algorithm &&
+        data['nonce'] is String &&
+        data['ciphertext'] is String;
   }
 
-  /// Rotate encryption key (for security)
+  /// Whether [data] was written by the earlier encryption, which reused one
+  /// IV per process. Such records are deleted rather than decrypted.
+  static bool isLegacyEncrypted(Map<String, Object?> data) {
+    return data.containsKey('encrypted_data') && data.containsKey('iv');
+  }
+
+  /// Replaces the key. Records sealed under the old key become unreadable.
   static Future<void> rotateKey() async {
-    final keyFile = await _getKeyFile();
-    if (await keyFile.exists()) {
-      await keyFile.delete();
-    }
-    await initialize();
+    await _keyStore.delete();
+    _encrypter = null;
   }
 
-  /// Delete encryption key (for data destruction)
+  /// Deletes the key, making every encrypted record unreadable.
   static Future<void> deleteKey() async {
-    final keyFile = await _getKeyFile();
-    if (await keyFile.exists()) {
-      await keyFile.delete();
-    }
+    await _keyStore.delete();
     _encrypter = null;
-    _iv = null;
   }
 }

@@ -252,6 +252,7 @@ class SynheartWear {
     if (!config.enableLocalCaching) {
       return {'enabled': false, 'encryption_enabled': false};
     }
+      enableEncryption: config.enableEncryption,
 
     return await LocalCache.getCacheStats(
       encryptionEnabled: config.enableEncryption,
