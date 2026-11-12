@@ -15,6 +15,8 @@ class _HomePageState extends State<HomePage> {
   late final SynheartWear _wear;
   String _status = 'Not initialized';
   Map<MetricType, num>? _latestMetrics;
+  String? _source;
+  String? _history;
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _HomePageState extends State<HomePage> {
       final granted = await _wear.requestPermissions(
         permissions: const {
           PermissionType.heartRate,
+          PermissionType.heartRateVariability,
           PermissionType.steps,
         },
       );
@@ -43,6 +46,7 @@ class _HomePageState extends State<HomePage> {
       final metrics = await _wear.readMetrics();
       setState(() {
         _status = 'Connected';
+        _source = '${metrics.source} (${metrics.deviceId})';
         _latestMetrics = {
           for (final t in MetricType.values)
             if (metrics.getMetric(t) != null) t: metrics.getMetric(t)!,
@@ -51,6 +55,13 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       setState(() => _status = 'Error: $e');
     }
+  }
+
+  /// Android: lift Health Connect's 30-day limit on past data.
+  Future<void> _requestHistory() async {
+    final available = await HealthAdapter.isHistoryAvailable();
+    final granted = await HealthAdapter.requestHistoryAuthorization();
+    setState(() => _history = 'available: $available, granted: $granted');
   }
 
   @override
@@ -68,7 +79,14 @@ class _HomePageState extends State<HomePage> {
               onPressed: _connect,
               child: const Text('Request permissions and read metrics'),
             ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: _requestHistory,
+              child: const Text('Request history access'),
+            ),
+            if (_history != null) Text('History $_history'),
             const SizedBox(height: 24),
+            if (_source != null) Text('Source: $_source'),
             if (_latestMetrics != null) ...[
               Text(
                 'Latest metrics',
