@@ -92,6 +92,24 @@ class FailingWearAdapter implements WearAdapter {
   @override
   String get id => 'failing_adapter';
 
+
+    test('history access has no limit to lift off Android', () async {
+      // Tests run on the host, not Android: no platform call is made.
+      expect(await HealthAdapter.isHistoryAvailable(), isFalse);
+      expect(await HealthAdapter.isHistoryAuthorized(), isTrue);
+      expect(await HealthAdapter.requestHistoryAuthorization(), isTrue);
+    });
+
+    test('labels data by the store it came from', () {
+      expect(
+        AppleHealthKitAdapter.sourceFor(isAndroid: true),
+        'health_connect',
+      );
+      expect(
+        AppleHealthKitAdapter.sourceFor(isAndroid: false),
+        'apple_healthkit',
+      );
+    });
   @override
   Set<PermissionType> get supportedPermissions => {PermissionType.heartRate};
 

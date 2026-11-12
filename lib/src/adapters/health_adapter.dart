@@ -265,6 +265,61 @@ class HealthAdapter {
     }
   }
 
+  /// Whether this device's Health Connect offers the history permission
+  /// (`READ_HEALTH_DATA_HISTORY`). Without that permission an app reads only
+  /// the 30 days before it was first granted access, for every record type,
+  /// sleep included.
+  ///
+  /// False on iOS, where HealthKit has no such window, and on Health Connect
+  /// versions that predate the permission.
+  static Future<bool> isHistoryAvailable() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      await _ensureConfigured();
+      return await _health.isHealthDataHistoryAvailable();
+    } catch (e) {
+      logDebug('Health history availability check failed: $e');
+      return false;
+    }
+  }
+
+  /// Whether the app may read Health Connect data older than 30 days.
+  /// Always true on iOS, which has no such limit.
+  static Future<bool> isHistoryAuthorized() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      await _ensureConfigured();
+      return await _health.isHealthDataHistoryAuthorized();
+    } catch (e) {
+      logDebug('Health history authorization check failed: $e');
+      return false;
+    }
+  }
+
+  /// Ask for Health Connect history access (`READ_HEALTH_DATA_HISTORY`), so
+  /// reads such as [fetchSleepNights] can reach further back than 30 days.
+  ///
+  /// This is its own system prompt, separate from [requestPermissions], and
+  /// the host app must declare the permission in its manifest (this plugin's
+  /// manifest declares no health permissions). Returns true when granted or
+  /// already granted, and always true on iOS. Returns false when this
+  /// device's Health Connect doesn't offer the permission.
+  static Future<bool> requestHistoryAuthorization() async {
+    if (!Platform.isAndroid) return true;
+    // Never stack this prompt on a permission dialog that is still open.
+    final inFlight = _permissionCompleter;
+    if (inFlight != null) await inFlight.future;
+    try {
+      await _ensureConfigured();
+      if (!await _health.isHealthDataHistoryAvailable()) return false;
+      if (await _health.isHealthDataHistoryAuthorized()) return true;
+      return await _health.requestHealthDataHistoryAuthorization();
+    } catch (e) {
+      logError('Health history authorization request error', e);
+      return false;
+    }
+  }
+
   /// Read health data and convert to WearMetrics in one step.
   ///
   /// On Android the call is throttled to one read per
