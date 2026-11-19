@@ -10,16 +10,23 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Push the release tag with a synheart-release App token, not GITHUB_TOKEN
+      # (whose pushes don't trigger publish.yml) or a person-owned PAT (which
+      # expires). Scoped to Contents: write on this repo only.
+      - name: Mint release token
+        id: release-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.SYNHEART_RELEASE_APP_ID }}
+          private-key: ${{ secrets.SYNHEART_RELEASE_APP_PRIVATE_KEY }}
+          owner: synheart-ai
+          repositories: synheart-wear-flutter
+          permission-contents: write
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Use a PAT so the tag push later in this workflow triggers
-          # publish.yml. Tags pushed using the default GITHUB_TOKEN do not
-          # trigger downstream workflows (GitHub's loop-prevention rule).
-          # Falls back to github.token when PUBLISH_PAT isn't set so this
-          # workflow keeps working in repos that haven't configured the
-          # secret yet; auto-publish kicks in once it lands.
-          token: ${{ secrets.PUBLISH_PAT || github.token }}
+          token: ${{ steps.release-token.outputs.token }}
 
       - name: Read pubspec version
         id: ver
