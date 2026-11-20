@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+# Read-only token: these jobs only check out, build and test.
+permissions:
+  contents: read
+
 jobs:
   garmin-overlay-guard:
     name: Garmin overlay safety check
