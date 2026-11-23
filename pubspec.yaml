@@ -21,7 +21,7 @@ dependencies:
   meta: ^1.16.0
   uuid: ^4.4.0
   path_provider: ^2.1.4
-  health: ^13.2.1
+  health: ">=13.2.1 <15.0.0"
   platform: ^3.1.6
   encrypt: ^5.0.1
   http: ^1.2.0
@@ -29,12 +29,12 @@ dependencies:
   shared_preferences: ^2.2.2
   # Apple Health XML backfill
   crypto: ^3.0.3
-  xml: ^6.5.0
+  xml: ">=6.5.0 <8.0.0"
   flutter_secure_storage: ">=9.0.0 <12.0.0"
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  very_good_analysis: ^6.0.0
+  very_good_analysis: ">=6.0.0 <12.0.0"
 flutter:
   # This package exposes platform plugins for iOS (HealthKit RR) and Android (Health Connect helpers)
   plugin:

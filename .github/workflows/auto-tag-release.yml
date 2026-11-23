@@ -15,7 +15,7 @@ jobs:
       # expires). Scoped to Contents: write on this repo only.
       - name: Mint release token
         id: release-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ vars.SYNHEART_RELEASE_APP_ID }}
           private-key: ${{ secrets.SYNHEART_RELEASE_APP_PRIVATE_KEY }}
@@ -23,7 +23,7 @@ jobs:
           repositories: synheart-wear-flutter
           permission-contents: write
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ steps.release-token.outputs.token }}
