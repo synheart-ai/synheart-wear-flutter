@@ -778,9 +778,9 @@ class HealthAdapter {
   /// stays whole. Each night is keyed by the local-time day-anchor
   /// (midnight) of its end; where a day has more than one (a nap), the
   /// longest is kept. Values are minutes — `total` is the asleep total
-  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP, else
-  /// SLEEP_IN_BED or the Health Connect session; in-bed time overlaps
-  /// asleep time, so they never add).
+  /// (deep+light+rem when stages exist, else SLEEP_ASLEEP, else the Health
+  /// Connect session). SLEEP_IN_BED is never asleep time: a night with only
+  /// in-bed time keeps its span but has a `total` of 0.
   static Future<Map<DateTime, SleepNightSummary>> fetchSleepNights({
     required DateTime start,
     required DateTime end,
@@ -874,11 +874,11 @@ class HealthAdapter {
         case HealthDataType.SLEEP_ASLEEP:
           acc.asleepSpans.add((p.dateFrom, p.dateTo));
           break;
-        // A Health Connect session spans the night like in-bed time; it
-        // counts only when nothing inside it says asleep.
-        case HealthDataType.SLEEP_IN_BED:
+        // A Health Connect session counts only when nothing inside it says
+        // asleep. In-bed time never counts (it anchors the span and latency
+        // only): lying in bed is not sleep.
         case HealthDataType.SLEEP_SESSION:
-          acc.inBedSpans.add((p.dateFrom, p.dateTo));
+          acc.sessionSpans.add((p.dateFrom, p.dateTo));
           break;
         case HealthDataType.SLEEP_DEEP:
           acc.deep += mins;
@@ -1352,9 +1352,9 @@ class _SleepAcc {
   /// Unstaged asleep segments (SLEEP_ASLEEP).
   final asleepSpans = <(DateTime, DateTime)>[];
 
-  /// In-bed (or Health Connect session) segments, which overlap the asleep
-  /// ones rather than add to them.
-  final inBedSpans = <(DateTime, DateTime)>[];
+  /// Health Connect session segments, which overlap the asleep ones rather
+  /// than add to them.
+  final sessionSpans = <(DateTime, DateTime)>[];
 
   /// Span of every segment in the night, awake and in-bed included.
   DateTime? start;
@@ -1367,7 +1367,7 @@ class _SleepAcc {
     final stageTotal = deep + light + rem;
     if (stageTotal > 0) return stageTotal;
     final asleep = _unionMinutes(asleepSpans);
-    return asleep > 0 ? asleep : _unionMinutes(inBedSpans);
+    return asleep > 0 ? asleep : _unionMinutes(sessionSpans);
   }
 
   /// Minutes covered by [spans], each counted once where they overlap.
