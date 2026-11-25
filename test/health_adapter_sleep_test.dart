@@ -71,9 +71,17 @@ void main() {
       expect(out.values.single.totalAsleepMinutes, 420);
     });
 
-    test('in-bed time counts only when nothing says asleep', () {
+    test('in-bed time alone is not sleep', () {
       final out = HealthAdapter.summarizeSleepNights([
         _seg(HealthDataType.SLEEP_IN_BED, _t(28, 23), _t(29, 7)),
+      ]);
+      expect(out.values.single.totalAsleepMinutes, 0);
+    });
+
+    test('a session wins over in-bed time', () {
+      final out = HealthAdapter.summarizeSleepNights([
+        _seg(HealthDataType.SLEEP_IN_BED, _t(28, 22, 30), _t(29, 7, 30)),
+        _seg(HealthDataType.SLEEP_SESSION, _t(28, 23), _t(29, 7)),
       ]);
       expect(out.values.single.totalAsleepMinutes, 480);
     });
