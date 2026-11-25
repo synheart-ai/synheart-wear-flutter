@@ -2,7 +2,7 @@ group 'ai.synheart.wear'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.9.20'
+    ext.kotlin_version = '1.9.25'
     repositories {
         google()
         mavenCentral()
@@ -91,7 +91,7 @@ dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
 
     // Coroutines for async operations.
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0'
 
     // ========================================================================
     // GARMIN SDK DEPENDENCY (Optional, licensed — pinned to v4.7.0)
@@ -132,12 +132,12 @@ dependencies {
         // net.sqlcipher.*). Without this the :ghProcess crashes.
         // 4.10.0 is the first release that ships 16 KB ELF-aligned native
         // libs (required by Play Store from Nov 2025 for Android 15+ devices).
-        implementation 'net.zetetic:sqlcipher-android:4.10.0'
+        implementation 'net.zetetic:sqlcipher-android:4.20.0'
         implementation 'androidx.sqlite:sqlite:2.4.0'
 
         // Garmin Health SDK uses Room with Guava ListenableFuture integration.
-        implementation 'androidx.room:room-runtime:2.6.1'
-        implementation 'androidx.room:room-guava:2.6.1'
+        implementation 'androidx.room:room-runtime:2.8.5'
+        implementation 'androidx.room:room-guava:2.8.5'
     } else {
         logger.lifecycle(
             "synheart_wear: Garmin companion-sdk AAR not found at " +
