@@ -13,6 +13,10 @@ updates:
     directory: "/"
     patterns: ["*"]
     multi-ecosystem-group: dependency-updates
+    ignore:
+      # Majors are upgraded by hand and tested on a device.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: gradle
     directory: "/android"
@@ -20,6 +24,8 @@ updates:
     multi-ecosystem-group: dependency-updates
     ignore:
       - dependency-name: "com.garmin.health:companion-sdk"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
