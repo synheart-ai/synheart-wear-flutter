@@ -15,7 +15,7 @@ jobs:
     name: Garmin overlay safety check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify no Garmin companion overlay symlinks landed in tree
         run: make verify-clean
 
@@ -31,7 +31,7 @@ jobs:
           # Track latest stable to catch upcoming breakages early
           - "stable"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Flutter (pinned)
         if: matrix.flutter != 'stable'
         uses: subosito/flutter-action@v2
